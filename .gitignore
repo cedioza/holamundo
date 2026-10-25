@@ -1,2 +1,24 @@
-.impeccable/review/
+# Python
+__pycache__/
+*.py[cod]
+*.sqlite
+*.sqlite3
+*.db
+.venv/
+backend/.venv/
+backend/autos_colombia_test.db
+.pytest_cache/
+.coverage
+
+# Angular / Node
+frontend/node_modules/
+frontend/dist/
+frontend/.angular/
+
+# Local config and editor files
+.env
+.env.*
+!.env.example
+/frontend/.vscode/
 .DS_Store
+*.log

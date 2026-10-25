@@ -1,0 +1,88 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+
+:root {
+  color-scheme: light;
+
+  /* Paleta extraída del diseño de Figma · Autos Colombia */
+  --ink: #192b44; /* texto principal */
+  --ink-muted: #62738b; /* texto secundario */
+  --primary: #205ac7; /* acción primaria */
+  --primary-soft: #edf2fd; /* fondo de acción primaria atenuado */
+  --sidebar: #102c54; /* azul profundo de la navegación lateral */
+  --sidebar-muted: #b8c9df; /* azul claro de la navegación lateral */
+  --border: #dfe6ef; /* divisores y contornos */
+  --surface: #f8fafd; /* superficie sutil */
+  --white: #ffffff;
+  --success: #1c7a4c;
+  --success-soft: #e8f5ee;
+  --danger: #b33227;
+  --danger-soft: #fdecea;
+  --warning-bg: #fff5de;
+  --warning-fg: #94600f;
+  --info-soft: #eaf1ff; /* pastilla y mensaje informativo */
+  --ok-soft: #e9f6ef; /* operación permitida */
+  --ok-fg: #187453;
+  --blocked-soft: #fff0f1; /* ingreso bloqueado */
+  --blocked-fg: #b53643;
+
+  font-family: 'Inter', 'Segoe UI', sans-serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  background: var(--surface);
+  color: var(--ink);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  min-width: 360px;
+  min-height: 100%;
+  scroll-behavior: smooth;
+  scrollbar-color: #b9c6d8 var(--surface);
+}
+
+body {
+  margin: 0;
+  min-width: 360px;
+  min-height: 100vh;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button {
+  color: inherit;
+}
+
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+::selection {
+  color: #fff;
+  background: var(--primary);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
