@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="Punto: una calculadora web rápida para tus operaciones diarias." />
+    <title>Punto — Calculadora web</title>
+    <link rel="stylesheet" href="styles.css" />
+    <script src="script.js" defer></script>
+  </head>
+  <body>
+    <!--
+      THESIS: Punto convierte una operación breve en una respuesta clara, sin la cuadrícula genérica de una calculadora de sistema.
+      OWN-WORLD: azul tinta, papel luminoso y lima eléctrica con una cinta de cálculo que conserva el contexto.
+      STORY: la persona escribe, revisa la expresión completa y confirma el resultado; borrar y reiniciar siempre están a mano.
+      FIRST VIEWPORT: marca arriba, calculadora a la izquierda y cinta de operaciones a la derecha; el display domina y la tecla igual cierra el recorrido.
+      FORM: herramienta de escritorio compacta, posición 7 del listado de direcciones; seed b53ebcad.
+      FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, DESIGN.md, and every shipping raster carrying its provenance
+    -->
+    <header class="site-header">
+      <a class="brand" href="." aria-label="Punto, inicio">
+        <span class="brand-mark" aria-hidden="true">+</span>
+        <span>Punto</span>
+      </a>
+      <p class="header-note">cálculo claro, sin rodeos</p>
+    </header>
+
+    <main class="app-shell">
+      <section class="calculator-panel" aria-labelledby="calculator-title">
+        <div class="panel-heading">
+          <div>
+            <p class="eyebrow">Calculadora diaria</p>
+            <h1 id="calculator-title">Haz que cuadre.</h1>
+          </div>
+          <span class="status-dot" aria-label="Calculadora lista"></span>
+        </div>
+
+        <div class="display" aria-live="polite" aria-atomic="true">
+          <p class="display-expression" id="expression">0</p>
+          <p class="display-result" id="result">0</p>
+        </div>
+
+        <div class="keypad" aria-label="Teclado de calculadora">
+          <button class="key key-muted" data-action="clear" type="button">AC</button>
+          <button class="key key-muted" data-action="backspace" type="button" aria-label="Borrar último carácter">⌫</button>
+          <button class="key key-muted" data-action="percent" type="button">%</button>
+          <button class="key key-operator" data-value="÷" type="button" aria-label="Dividir">÷</button>
+
+          <button class="key" data-value="7" type="button">7</button>
+          <button class="key" data-value="8" type="button">8</button>
+          <button class="key" data-value="9" type="button">9</button>
+          <button class="key key-operator" data-value="×" type="button" aria-label="Multiplicar">×</button>
+
+          <button class="key" data-value="4" type="button">4</button>
+          <button class="key" data-value="5" type="button">5</button>
+          <button class="key" data-value="6" type="button">6</button>
+          <button class="key key-operator" data-value="−" type="button" aria-label="Restar">−</button>
+
+          <button class="key" data-value="1" type="button">1</button>
+          <button class="key" data-value="2" type="button">2</button>
+          <button class="key" data-value="3" type="button">3</button>
+          <button class="key key-operator" data-value="+" type="button" aria-label="Sumar">+</button>
+
+          <button class="key" data-action="sign" type="button">+/−</button>
+          <button class="key" data-value="0" type="button">0</button>
+          <button class="key" data-value="." type="button" aria-label="Punto decimal">.</button>
+          <button class="key key-equals" data-action="equals" type="button" aria-label="Calcular resultado">=</button>
+        </div>
+        <p class="keyboard-hint"><span aria-hidden="true">↵</span> También puedes usar tu teclado</p>
+      </section>
+
+      <aside class="tape-panel" aria-labelledby="tape-title">
+        <div class="tape-heading">
+          <div>
+            <p class="eyebrow">Memoria breve</p>
+            <h2 id="tape-title">Cinta de cálculo</h2>
+          </div>
+          <button class="clear-history" id="clear-history" type="button">Limpiar</button>
+        </div>
+        <div class="tape-list" id="history" aria-live="polite">
+          <div class="empty-tape" id="empty-history">
+            <span class="empty-icon" aria-hidden="true">↗</span>
+            <p>Tus operaciones aparecerán aquí.</p>
+            <span>El contexto también cuenta.</span>
+          </div>
+        </div>
+        <div class="tape-footer">
+          <span>Atajos</span>
+          <span><kbd>Esc</kbd> limpia <kbd>Enter</kbd> calcula</span>
+        </div>
+      </aside>
+    </main>
+
+    <footer class="site-footer">
+      <span>Hecho para resolver lo pequeño.</span>
+      <span>v1.0 · sin dependencias</span>
+    </footer>
+  </body>
+</html>
