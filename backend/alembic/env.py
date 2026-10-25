@@ -14,6 +14,8 @@ if config.config_file_name is not None:
 url = os.environ["DATABASE_URL"]
 if not url.startswith(("postgresql://", "postgresql+")):
     raise RuntimeError("Alembic espera una DATABASE_URL de PostgreSQL.")
+if url.startswith("postgresql://"):
+    url = "postgresql+psycopg://" + url.removeprefix("postgresql://")
 config.set_main_option("sqlalchemy.url", url.replace("%", "%%"))
 target_metadata = Base.metadata
 

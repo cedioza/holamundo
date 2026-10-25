@@ -22,6 +22,8 @@ def load_database_url() -> str:
         raise RuntimeError(
             f"DATABASE_URL debe apuntar a PostgreSQL (postgresql+psycopg://...). Recibido: {scheme}://"
         )
+    if url.startswith("postgresql://"):
+        return "postgresql+psycopg://" + url.removeprefix("postgresql://")
     return url
 
 

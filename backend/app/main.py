@@ -1,5 +1,6 @@
 from calendar import monthrange
 from contextlib import asynccontextmanager
+import os
 from datetime import date, datetime, timedelta, time
 from decimal import Decimal
 from typing import Any
@@ -31,9 +32,14 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(title="Autos Colombia API", version="0.1.0", description="Gestión configurable de parqueaderos mensuales", lifespan=lifespan)
+cors_origins = [
+    origin.strip()
+    for origin in os.getenv("CORS_ORIGINS", "http://localhost:4200,http://127.0.0.1:4200").split(",")
+    if origin.strip()
+]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:4200", "http://127.0.0.1:4200"],
+    allow_origins=cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -56,8 +62,11 @@ def add_months(value: date, months: int) -> date:
 
 def parse_clock(value: str) -> time:
     """Convierte 'HH:MM' en un objeto time para los turnos."""
-    hour, minute = value.strip().split(":")
-    return time(int(hour), int(minute))
+    try:
+        hour, minute = value.strip().split(":")
+        return time(int(hour), int(minute))
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(422, "La hora debe estar entre 00:00 y 23:59") from exc
 
 
 def tariff_state(tariff: MonthlyTariff, today: date) -> str:
@@ -217,7 +226,7 @@ def create_parking_lot(payload: ParkingLotCreate, db: Session = Depends(get_db))
 
 
 @app.patch("/api/parking-lots/{lot_id}")
-def update_parking_lot(lot_id: int, payload: ParkingLotUpdate, db: Session = Depends(get_db)) -> dict[str, Any]:
+def update_parking_lot_by_id(lot_id: int, payload: ParkingLotUpdate, db: Session = Depends(get_db)) -> dict[str, Any]:
     lot = db.get(ParkingLot, lot_id)
     if not lot:
         raise HTTPException(404, "Parqueadero no encontrado")
@@ -256,10 +265,13 @@ def bootstrap(parking_lot_id: int | None = None, db: Session = Depends(get_db)) 
 @app.patch("/api/parking-lot")
 def update_parking_lot(payload: ParkingLotUpdate, parking_lot_id: int | None = None, db: Session = Depends(get_db)) -> dict[str, Any]:
     lot_id = parking_lot_id or db.scalar(select(ParkingLot.id).order_by(ParkingLot.id).limit(1))
-    lot = db.get(ParkingLot, lot_id) if lot_id else None
+    if lot_id is None:
+        raise HTTPException(404, "Parqueadero no encontrado")
+    lot = db.get(ParkingLot, lot_id)
     if not lot:
         raise HTTPException(404, "Parqueadero no encontrado")
-    lot.name = payload.name.strip()
+    if payload.name is not None:
+        lot.name = payload.name.strip()
     lot.tax_id = payload.tax_id
     db.commit()
     return {"id": lot.id, "name": lot.name, "tax_id": lot.tax_id}
@@ -331,6 +343,10 @@ def dashboard(parking_lot_id: int | None = None, db: Session = Depends(get_db)) 
         .join(MonthlyContract).join(Vehicle)
         .where(Vehicle.parking_lot_id == lot_id, func.date(Payment.paid_at) == today)
     ).one()
+    try:
+        payments_today_count = int(today_payments[1] or 0)
+    except (TypeError, ValueError, OverflowError):
+        payments_today_count = 0
     return {
         "parking_lot_id": lot_id,
         "customers_registered": customers_count,
@@ -347,7 +363,7 @@ def dashboard(parking_lot_id: int | None = None, db: Session = Depends(get_db)) 
         "monthly_expiring_soon": expiring_soon,
         "payments_this_month": money_float(db.scalar(select(func.coalesce(func.sum(Payment.amount), 0)).join(MonthlyContract).join(Vehicle).where(Vehicle.parking_lot_id == lot_id, func.extract("month", Payment.paid_at) == today.month, func.extract("year", Payment.paid_at) == today.year)) or 0),
         "payments_today": money_float(today_payments[0] or 0),
-        "payments_today_count": int(today_payments[1] or 0),
+        "payments_today_count": payments_today_count,
     }
 
 

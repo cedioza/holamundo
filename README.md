@@ -151,6 +151,30 @@ CREATE DATABASE autos_colombia_test;
 
 Las pruebas usan `backend/autos_colombia_test.db`, también fuera del repositorio.
 
+## Despliegue en Dokploy
+
+El repositorio incluye `docker-compose.yml` para desplegar la aplicación completa:
+
+- `frontend`: compilación Angular servida por Nginx en el puerto 80.
+- `backend`: FastAPI en el puerto 8000; ejecuta `alembic upgrade head` antes de iniciar.
+- `db`: PostgreSQL 16 con el volumen persistente `postgres_data`.
+
+En Dokploy selecciona:
+
+1. Repositorio `cedioza/holamundo`.
+2. Rama `feature/autos-colombia`.
+3. **Compose Path:** `./docker-compose.yml`.
+4. Configura estas variables en el entorno del Compose: `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, `DATABASE_URL` y, solo si el API se publica en otro dominio, `CORS_ORIGINS`.
+5. Asigna el dominio al servicio `frontend` en el puerto `80`.
+
+`DATABASE_URL` debe usar el nombre del servicio de Compose, no `localhost`:
+
+```dotenv
+DATABASE_URL=postgresql+psycopg://autos_colombia:CLAVE_URL_ENCODED@db:5432/autos_colombia
+```
+
+Usa `.env.dokploy.example` como plantilla, cambia las credenciales y no subas valores reales. El volumen de PostgreSQL debe conservarse y debe configurarse una política de copias de seguridad en Dokploy. Esta versión todavía no incorpora autenticación; no la expongas con información personal real sin añadirla.
+
 ## API
 
 La API expone recursos bajo `/api` y se documenta en <http://127.0.0.1:8000/docs>. Grupos principales:
