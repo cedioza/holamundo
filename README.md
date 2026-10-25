@@ -4,6 +4,8 @@ Aplicación web para administrar la operación de uno o varios parqueaderos: cli
 
 > **Versión local de demostración:** no incluye autenticación ni autorización. No la expongas en Internet ni ingreses información personal real.
 
+**Contenido:** [Funcionalidades](#funcionalidades) · [Tecnologías](#tecnologías) · [Requisitos](#requisitos) · [Obtener el código](#obtener-el-código) · [Ejecutar con `run-local.sh`](#ejecutar-con-run-localsh) · [Base de datos y persistencia](#base-de-datos-y-persistencia) · [Pruebas y compilación](#ejecutar-pruebas-y-compilación) · [Despliegue en Dokploy](#despliegue-en-dokploy) · [API](#api) · [Estructura del proyecto](#estructura-del-proyecto) · [Documentación relacionada](#documentación-relacionada) · [Reglas y decisiones provisionales](#reglas-y-decisiones-provisionales)
+
 ## Funcionalidades
 
 - Consultar el estado del parqueadero y la ocupación de celdas.
@@ -38,6 +40,21 @@ La capacidad se calcula a partir de las celdas operativas configuradas; no está
 - Python 3.12 o superior (probado con Python 3.13).
 - Node.js 22.12 o superior y npm.
 - Bash: `bash` en Linux/macOS o **Git Bash** en Windows (viene con Git para Windows). También funciona en WSL.
+- **Docker** solo si vas a desplegar (ver [Despliegue en Dokploy](#despliegue-en-dokploy)); no se necesita para desarrollo local.
+
+## Obtener el código
+
+```bash
+git clone https://github.com/cedioza/holamundo.git
+cd holamundo
+git checkout feature/autos-colombia
+```
+
+| Rama | Contenido |
+| --- | --- |
+| `feature/autos-colombia` | Rama activa de desarrollo y despliegue (la que usa Dokploy). |
+| `backup/autos-colombia-actual` | Copia de seguridad del estado actual del proyecto. |
+| `main` | Rama principal del repositorio. |
 
 ## Ejecutar con `run-local.sh`
 
@@ -101,6 +118,7 @@ La demostración **no** siembra empleados ni turnos: la pantalla *Empleados y tu
 - **`DATABASE_URL no está definida`:** falta el archivo `.env`. Copia `.env.example` a `.env` y completa la conexión.
 - **`DATABASE_URL debe apuntar a PostgreSQL`:** la variable apunta a otro motor. Solo se admite `postgresql+psycopg://`.
 - **`no existe la base de datos ...`:** créala antes de iniciar, por ejemplo `createdb autos_colombia_app`, o corrige el nombre en `.env`.
+- **`Define DATABASE_URL antes de ejecutar las pruebas`:** estás ejecutando `pytest` sin cargar la conexión. Ejecuta `set -a; source .env; set +a` en la raíz del proyecto y vuelve a intentarlo.
 
 ## Base de datos y persistencia
 
@@ -126,6 +144,13 @@ El diagrama de relaciones, las reglas de integridad y el flujo de creación de l
 
 ## Ejecutar pruebas y compilación
 
+Las pruebas y las migraciones leen `DATABASE_URL`. Si abriste una terminal nueva, carga tu `.env` una vez antes de ejecutarlas:
+
+```bash
+# Desde la raíz del proyecto (Linux / macOS / Git Bash)
+set -a; source .env; set +a
+```
+
 ```bash
 # Pruebas del backend
 cd backend
@@ -141,23 +166,32 @@ cd ..
 # Compilar el frontend (requiere node_modules: ya los crea run-local.sh)
 cd frontend
 npm run build
+
+# Comprobar formato de código (Prettier, opcional)
+npx prettier --check .
 ```
 
-Las pruebas derivan de tu `DATABASE_URL` una base propia, `autos_colombia_test`, y la vacían antes y después de cada prueba: **también corren en PostgreSQL** y nunca tocan tus datos reales. Crea esa base una sola vez:
+Las pruebas derivan de tu `DATABASE_URL` una base propia, `autos_colombia_test`, y la vacían antes y después de cada prueba: **corren en PostgreSQL** y nunca tocan tus datos reales. Crea esa base una sola vez:
 
 ```sql
 CREATE DATABASE autos_colombia_test;
 ```
 
-Las pruebas usan `backend/autos_colombia_test.db`, también fuera del repositorio.
+Si `DATABASE_URL` falta o no apunta a PostgreSQL, `backend/tests/conftest.py` detiene la ejecución con un mensaje claro. No hay archivos `.db` de prueba: el esquema se crea y se borra en cada corrida con SQLAlchemy sobre esa base.
+
+Archivos de prueba:
+
+- `backend/tests/test_parking_workflow.py` — ingreso con pago, salida y reutilización de celda; bloqueos por mensualidad o incompatibilidad; aislamiento entre parqueaderos; estructura de una sede nueva; placas duplicadas y mantenimiento de celdas.
+- `backend/tests/test_admin_module.py` — alta de parqueadero sin equipo, turnos y empleados por parqueadero, cambios de turno y bajas, cierre de vigencia de tarifas, reportes y actividad.
 
 ## Despliegue en Dokploy
 
 El repositorio incluye `docker-compose.yml` para desplegar la aplicación usando una base PostgreSQL externa (por ejemplo Neon):
 
-- `frontend`: compilación Angular servida por Nginx en el puerto 80.
+- `frontend`: compilación Angular servida por Nginx en el puerto 80; sirve los estáticos y hace *proxy* de `/api/` al servicio `backend`.
 - `backend`: FastAPI en el puerto 8000; ejecuta `alembic upgrade head` antes de iniciar.
 - La base de datos no se ejecuta dentro de Compose; se conecta mediante `DATABASE_URL`.
+- Ambos servicios declaran `healthcheck` y el frontend solo arranca cuando el backend responde en `/api/health`. `.dockerignore` mantiene `.env`, `node_modules` y `.venv` fuera de las imágenes.
 
 En Dokploy selecciona:
 
@@ -195,7 +229,10 @@ Casi todas las peticiones llevan el parámetro `parking_lot_id`, que es el que m
 ```text
 .
 ├── run-local.sh                  # Prepara dependencias, migra la BD e inicia la app
+├── docker-compose.yml            # Despliegue backend + frontend (BD externa)
 ├── .env.example                  # Plantilla de conexión a PostgreSQL (copia a .env)
+├── .env.dokploy.example          # Plantilla de variables para Dokploy (no subir valores reales)
+├── .dockerignore                 # Archivos excluidos de las imágenes Docker
 ├── README.md                     # Esta guía de instalación y uso
 ├── PRODUCT.md                    # Alcance, decisiones y reglas de producto
 ├── pyrightconfig.json            # Configuración de análisis Python del proyecto
@@ -207,20 +244,33 @@ Casi todas las peticiones llevan el parámetro `parking_lot_id`, que es el que m
 │   │   ├── schemas.py            # Esquemas de entrada/salida y validación
 │   │   └── database.py           # DATABASE_URL, motor y sesiones de PostgreSQL
 │   ├── alembic/                  # Configuración e historial de migraciones
+│   │   ├── env.py                # Lee DATABASE_URL y aplica las migraciones
 │   │   └── versions/             # Migraciones versionadas del esquema
-│   ├── tests/                    # Pruebas del flujo de negocio
+│   ├── tests/                    # Pruebas del flujo de negocio y del módulo de administración
+│   ├── Dockerfile                # Imagen Python 3.13: migra y sirve la API en :8000
+│   ├── alembic.ini               # Configuración de Alembic
 │   ├── requirements.txt          # Dependencias Python
 │   └── pyrightconfig.json        # Configuración de tipos del backend
 ├── frontend/
-│   ├── src/app/
-│   │   ├── app.ts                # Estado y acciones de la interfaz
-│   │   ├── app.html              # Plantilla de pantallas y formularios
-│   │   ├── app.scss              # Estilos y diseño adaptable
-│   │   └── api.service.ts        # Comunicación HTTP con FastAPI
+│   ├── src/
+│   │   ├── app/
+│   │   │   ├── app.ts            # Estado y acciones de la interfaz
+│   │   │   ├── app.html          # Plantilla de pantallas y formularios
+│   │   │   ├── app.scss          # Estilos y diseño adaptable
+│   │   │   ├── api.service.ts    # Comunicación HTTP con FastAPI
+│   │   │   ├── app.config.ts     # Locale es-CO, router y HttpClient
+│   │   │   └── app.routes.ts     # Rutas (la app es de pantalla única)
+│   │   ├── main.ts               # Arranque de la aplicación
+│   │   ├── styles.scss           # Tokens globales de diseño
+│   │   └── index.html            # Título, idioma y metadatos
 │   ├── public/icons/             # Iconos SVG locales (sin CDN)
 │   ├── README.md                 # Sistema de diseño y tokens de la interfaz
+│   ├── Dockerfile                # Compila Angular y sirve con Nginx en :80
+│   ├── nginx.conf                # Estáticos + proxy de /api/ al backend
 │   ├── angular.json              # Configuración de Angular
-│   └── package.json              # Dependencias y comandos npm
+│   ├── .prettierrc               # Reglas de formato (ancho 100, comillas simples)
+│   ├── package.json              # Dependencias y comandos npm
+│   └── tsconfig*.json            # Configuración de TypeScript
 └── docs/
     ├── arquitectura.md           # Arquitectura de la solución
     ├── modelo-er.md              # Diagramas Mermaid ER y de conexión de la BD
