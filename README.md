@@ -153,27 +153,27 @@ Las pruebas usan `backend/autos_colombia_test.db`, también fuera del repositori
 
 ## Despliegue en Dokploy
 
-El repositorio incluye `docker-compose.yml` para desplegar la aplicación completa:
+El repositorio incluye `docker-compose.yml` para desplegar la aplicación usando una base PostgreSQL externa (por ejemplo Neon):
 
 - `frontend`: compilación Angular servida por Nginx en el puerto 80.
 - `backend`: FastAPI en el puerto 8000; ejecuta `alembic upgrade head` antes de iniciar.
-- `db`: PostgreSQL 16 con el volumen persistente `postgres_data`.
+- La base de datos no se ejecuta dentro de Compose; se conecta mediante `DATABASE_URL`.
 
 En Dokploy selecciona:
 
 1. Repositorio `cedioza/holamundo`.
 2. Rama `feature/autos-colombia`.
 3. **Compose Path:** `./docker-compose.yml`.
-4. Configura estas variables en el entorno del Compose: `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, `DATABASE_URL` y, solo si el API se publica en otro dominio, `CORS_ORIGINS`.
+4. Configura `DATABASE_URL` con la conexión de tu PostgreSQL externo y, solo si el API se publica en otro dominio, `CORS_ORIGINS`.
 5. Asigna el dominio al servicio `frontend` en el puerto `80`.
 
-`DATABASE_URL` debe usar el nombre del servicio de Compose, no `localhost`:
+`DATABASE_URL` debe usar el hostname público de tu proveedor, nunca `localhost` ni `127.0.0.1`:
 
 ```dotenv
-DATABASE_URL=postgresql+psycopg://autos_colombia:CLAVE_URL_ENCODED@db:5432/autos_colombia
+DATABASE_URL=postgresql+psycopg://USUARIO:CLAVE_URL_ENCODED@HOST:5432/BASE?sslmode=require
 ```
 
-Usa `.env.dokploy.example` como plantilla, cambia las credenciales y no subas valores reales. El volumen de PostgreSQL debe conservarse y debe configurarse una política de copias de seguridad en Dokploy. Esta versión todavía no incorpora autenticación; no la expongas con información personal real sin añadirla.
+Usa `.env.dokploy.example` como plantilla, cambia las credenciales y no subas valores reales. Configura las copias de seguridad en el proveedor PostgreSQL externo. Esta versión todavía no incorpora autenticación; no la expongas con información personal real sin añadirla.
 
 ## API
 

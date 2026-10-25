@@ -1,32 +1,12 @@
 services:
-  db:
-    image: postgres:16-alpine
-    restart: unless-stopped
-    environment:
-      POSTGRES_DB: ${POSTGRES_DB:-autos_colombia}
-      POSTGRES_USER: ${POSTGRES_USER:-autos_colombia}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Define POSTGRES_PASSWORD in Dokploy}
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    expose:
-      - "5432"
-
   backend:
     build:
       context: .
       dockerfile: backend/Dockerfile
     restart: unless-stopped
     environment:
-      DATABASE_URL: ${DATABASE_URL:?Define DATABASE_URL using the db service hostname}
+      DATABASE_URL: ${DATABASE_URL:?Define DATABASE_URL for the external PostgreSQL database}
       CORS_ORIGINS: ${CORS_ORIGINS:-}
-    depends_on:
-      db:
-        condition: service_healthy
     expose:
       - "8000"
     healthcheck:
@@ -51,6 +31,3 @@ services:
       interval: 15s
       timeout: 5s
       retries: 5
-
-volumes:
-  postgres_data:
