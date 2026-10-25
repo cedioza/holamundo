@@ -98,7 +98,7 @@ export class ApiService {
   private readonly http = inject(HttpClient);
   private readonly base = ['localhost', '127.0.0.1'].includes(window.location.hostname)
     ? 'http://127.0.0.1:8000/api'
-    : '/api';
+    : 'https://dbiu.zyvra.lat/api';
   private activeLotId = 1;
 
   setParkingLot(id: number): void { this.activeLotId = id; }

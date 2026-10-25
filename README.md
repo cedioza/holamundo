@@ -164,8 +164,8 @@ En Dokploy selecciona:
 1. Repositorio `cedioza/holamundo`.
 2. Rama `feature/autos-colombia`.
 3. **Compose Path:** `./docker-compose.yml`.
-4. Configura `DATABASE_URL` con la conexión de tu PostgreSQL externo y, solo si el API se publica en otro dominio, `CORS_ORIGINS`.
-5. Asigna el dominio al servicio `frontend` en el puerto `80`.
+4. Configura `DATABASE_URL` con la conexión de tu PostgreSQL externo y `CORS_ORIGINS=https://iudigital.zyvra.lat`.
+5. Asigna `iudigital.zyvra.lat` al servicio `frontend` en el puerto `80` y `dbiu.zyvra.lat` al servicio `backend` en el puerto `8000`.
 
 `DATABASE_URL` debe usar el hostname público de tu proveedor, nunca `localhost` ni `127.0.0.1`:
 
@@ -173,7 +173,7 @@ En Dokploy selecciona:
 DATABASE_URL=postgresql+psycopg://USUARIO:CLAVE_URL_ENCODED@HOST:5432/BASE?sslmode=require
 ```
 
-Usa `.env.dokploy.example` como plantilla, cambia las credenciales y no subas valores reales. Configura las copias de seguridad en el proveedor PostgreSQL externo. Esta versión todavía no incorpora autenticación; no la expongas con información personal real sin añadirla.
+El frontend publicado usa `https://dbiu.zyvra.lat/api` para comunicarse directamente con el API; por eso `CORS_ORIGINS` debe incluir el dominio del frontend. Usa `.env.dokploy.example` como plantilla, cambia las credenciales y no subas valores reales. Configura las copias de seguridad en el proveedor PostgreSQL externo. Esta versión todavía no incorpora autenticación; no la expongas con información personal real sin añadirla.
 
 ## API
 
