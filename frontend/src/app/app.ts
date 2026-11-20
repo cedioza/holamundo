@@ -1,4 +1,4 @@
-import { CommonModule, DatePipe, registerLocaleData } from '@angular/common';
+import { CommonModule, registerLocaleData } from '@angular/common';
 import localeEsCo from '@angular/common/locales/es-CO';
 import type { HttpErrorResponse } from '@angular/common/http';
 import { ChangeDetectorRef, Component, ElementRef, type OnInit, ViewChild, inject } from '@angular/core';
@@ -159,7 +159,7 @@ interface MapZone {
 
 @Component({
   selector: 'app-root',
-  imports: [CommonModule, FormsModule, DatePipe, RouterOutlet],
+  imports: [CommonModule, FormsModule, RouterOutlet],
   templateUrl: './app.html',
   styleUrl: './app.scss',
 })
@@ -312,6 +312,10 @@ export class App implements OnInit {
   vehicleStatusFilter = 'TODAS';
   historyPage = 1;
   readonly historyPageSize = 10;
+  /** Placa que se muestra filtrada en el historial (enlace «Ver movimiento»). */
+  historyPlate = '';
+  /** Placa pendiente de aplicar al entrar al historial (la limpia `applyPage`). */
+  private historyPlatePending = '';
   bootstrap: Bootstrap | null = null;
   dashboard: Dashboard | null = null;
   customers: Customer[] = [];
@@ -328,6 +332,8 @@ export class App implements OnInit {
   sites: Site[] = [];
   zones: Zone[] = [];
   adminZones: Zone[] = [];
+  /** Parqueadero cuyas zonas ya están cargadas (evita repetir /zones). */
+  private adminZonesLotId = 0;
   parkingLots: ParkingLotSummary[] = [];
   employees: Employee[] = [];
   shifts: Shift[] = [];
@@ -448,6 +454,8 @@ export class App implements OnInit {
   invCellId = 0;
   /** Último cambio de estado conocido de cada celda (se carga página a página). */
   invEvents: Record<number, CellStatusEvent> = {};
+  /** Celdas con una consulta de eventos en vuelo (evita peticiones duplicadas). */
+  private readonly invEventsPending = new Set<number>();
   /* Registro y configuración · alta, edición y cambios de estado. */
   cellCreateAttempted = false;
   cellCreateNotice = '';
@@ -515,12 +523,24 @@ export class App implements OnInit {
   get activeMovements(): Movement[] {
     return this.movements.filter((item) => !item.exited_at);
   }
+  /** Movimientos que muestra el historial (filtrados por placa si la hay). */
+  get historyMovements(): Movement[] {
+    if (!this.historyPlate) return this.movements;
+    const placa = this.historyPlate.toUpperCase();
+    return this.movements.filter((item) => item.plate.toUpperCase() === placa);
+  }
   get pagedMovements(): Movement[] {
     const start = (this.historyPage - 1) * this.historyPageSize;
-    return this.movements.slice(start, start + this.historyPageSize);
+    return this.historyMovements.slice(start, start + this.historyPageSize);
   }
   get historyTotalPages(): number {
-    return Math.max(1, Math.ceil(this.movements.length / this.historyPageSize));
+    return Math.max(1, Math.ceil(this.historyMovements.length / this.historyPageSize));
+  }
+  /** Movimiento activo del aviso superior del historial. */
+  get historyActiveMovement(): Movement | undefined {
+    if (!this.historyPlate) return this.activeMovements[0];
+    const placa = this.historyPlate.toUpperCase();
+    return this.activeMovements.find((item) => item.plate.toUpperCase() === placa);
   }
   get historyPages(): number[] {
     const total = this.historyTotalPages;
@@ -533,10 +553,10 @@ export class App implements OnInit {
     return Array.from({ length: end - start + 1 }, (_, index) => start + index);
   }
   get paginationFrom(): number {
-    return this.movements.length ? (this.historyPage - 1) * this.historyPageSize + 1 : 0;
+    return this.historyMovements.length ? (this.historyPage - 1) * this.historyPageSize + 1 : 0;
   }
   get paginationTo(): number {
-    return Math.min(this.historyPage * this.historyPageSize, this.movements.length);
+    return Math.min(this.historyPage * this.historyPageSize, this.historyMovements.length);
   }
   goToHistoryPage(page: number): void {
     this.historyPage = Math.min(Math.max(1, page), this.historyTotalPages);
@@ -977,6 +997,8 @@ export class App implements OnInit {
   setCellsTab(tab: CellsTab): void {
     this.cellsTab = tab;
     this.error = '';
+    if (tab === 'map') this.loadMapZones();
+    if (tab === 'inventory') this.loadInventoryEvents();
     if (tab === 'registration') {
       if (!this.cellForm.site_id) this.resetCreateCellForm();
       this.ensureRegistrationCells();
@@ -985,11 +1007,14 @@ export class App implements OnInit {
 
   /** Abre el alta de celdas en la pestaña «Registro y configuración». */
   openCreateCell(): void {
-    if (this.page !== 'cells') this.navigate('cells');
+    const yaEnCeldas = this.page === 'cells';
+    if (!yaEnCeldas) this.navigate('cells');
     this.cellsTab = 'registration';
     this.error = '';
     this.resetCreateCellForm();
     this.ensureRegistrationCells();
+    // Si hay cambio de ruta, el render llega tarde y el panel ya queda a la vista.
+    if (yaEnCeldas) this.revealCellPanel('cellCreatePanel');
   }
 
   /** Deja los cuatro paneles con una celda elegida cuando la hay. */
@@ -1188,7 +1213,8 @@ export class App implements OnInit {
   /** Carga el último cambio de estado de las celdas visibles (sin repetirlos). */
   loadInventoryEvents(): void {
     for (const celda of this.inventoryRows) {
-      if (this.invEvents[celda.id]) continue;
+      if (this.invEvents[celda.id] || this.invEventsPending.has(celda.id)) continue;
+      this.invEventsPending.add(celda.id);
       this.api.cellStatusEvents(celda.id, 1).subscribe({
         next: (rows) => {
           if (rows[0]) {
@@ -1197,6 +1223,7 @@ export class App implements OnInit {
           }
         },
         error: () => undefined,
+        complete: () => this.invEventsPending.delete(celda.id),
       });
     }
   }
@@ -1212,7 +1239,7 @@ export class App implements OnInit {
     this.invFilters = { ...this.invDraft };
     this.invPage = 1;
     this.invCellId = 0;
-    this.loadInventoryEvents();
+    if (this.page === 'cells' && this.cellsTab === 'inventory') this.loadInventoryEvents();
   }
 
   /** Limpia los filtros y vuelve a la vista base del inventario. */
@@ -1244,6 +1271,39 @@ export class App implements OnInit {
     this.loadCellEdit(cell);
     this.cellsTab = 'registration';
     this.error = '';
+    this.revealCellEdit();
+  }
+
+  /**
+   * Espera al render de la pestaña de registro y aterriza en el panel de
+   * edición: el «Editar →» del inventario debe terminar en el formulario de
+   * esa celda, no arriba de la página.
+   */
+  private revealCellEdit(): void {
+    this.revealCellPanel('cellEditPanel', '#cellEditCode');
+  }
+
+  /**
+   * Espera al render de la pestaña de registro y aterriza en un panel concreto
+   * («Editar →» del inventario y «Crear celda» deben terminar en su formulario).
+   */
+  private revealCellPanel(panelId: string, focusSelector?: string): void {
+    setTimeout(() => {
+      const panel = document.getElementById(panelId);
+      if (!panel) return;
+      panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      if (focusSelector) {
+        panel.querySelector<HTMLElement>(focusSelector)?.focus({ preventScroll: true });
+      }
+    }, 80);
+  }
+
+  /** «Ver movimiento» del panel bloqueado: abre el historial de esa placa. */
+  openCellMovement(): void {
+    const placa = this.cellEditCell?.vehicle_plate;
+    if (!placa) return;
+    this.historyPlatePending = placa;
+    this.navigate('history');
   }
 
   /* ------------------------------------------------------------------ */
@@ -1258,6 +1318,25 @@ export class App implements OnInit {
   /** Nombre de la sede del alta, para el aviso superior de la pestaña. */
   get cellCreateSiteName(): string {
     return this.sites.find((site) => site.id === this.cellForm.site_id)?.name ?? 'la sede activa';
+  }
+
+  /**
+   * Titulillo del alta («ALTA · NUEVA CELDA A-036»). Tras un envío con errores
+   * cambia a modo revisión, como en el frame «ALTA · VALIDACIONES» de Figma.
+   */
+  get cellCreateKicker(): string {
+    if (this.cellCreateAttempted && !this.cellCreateValid) {
+      return 'Alta · Validaciones de la celda';
+    }
+    const codigo = this.cellForm.code.trim().toUpperCase();
+    return codigo ? `Alta · Nueva celda ${codigo}` : 'Alta · Nueva celda';
+  }
+
+  /** Título del alta: cambia a modo revisión cuando hay errores. */
+  get cellCreateTitle(): string {
+    return this.cellCreateAttempted && !this.cellCreateValid
+      ? 'Revisa los datos de la celda'
+      : 'Crear celda';
   }
 
   /** Cambia la sede del alta y recarga sus zonas. */
@@ -1332,29 +1411,46 @@ export class App implements OnInit {
   get cellEditKicker(): string {
     const celda = this.cellEditCell;
     if (!celda) return 'Edición · Sin celda seleccionada';
-    return `Edición · ${celda.code} · ${celda.occupied ? 'Ocupada' : 'Sin movimiento activo'}`;
+    // Figma «Celdas · Registro y configuración»: consulta cuando está ocupada.
+    if (celda.occupied) return `Consulta · ${celda.code}`;
+    return `Edición · ${celda.code} · Sin movimiento activo`;
   }
 
-  /** Contexto de la celda en edición («Sede / Zona»). */
-  get cellEditContext(): string {
+  /** Título del panel de edición según el estado de la celda. */
+  get cellEditTitle(): string {
     const celda = this.cellEditCell;
-    if (!celda) return 'Selecciona una celda para editarla.';
-    return `${celda.site_name} / ${celda.zone_name}`;
+    if (!celda) return 'Editar celda';
+    return celda.occupied ? 'Celda ocupada · Edición bloqueada' : 'Editar celda disponible';
   }
 
-  /** Zonas del formulario de edición. */
-  get cellEditZoneOptions(): Zone[] {
+  /** Píldora de estado del panel de edición (con placa si la celda está ocupada). */
+  get cellEditBadge(): string {
     const celda = this.cellEditCell;
-    return celda ? this.zonesOfSite(celda.site_id) : this.adminZones;
+    if (!celda) return '';
+    return celda.occupied
+      ? `● Ocupada${celda.vehicle_plate ? ` · ${celda.vehicle_plate}` : ''}`
+      : '○ Disponible';
   }
 
-  /** Errores de validación del formulario de edición. */
-  get cellEditErrors(): { zone: string; code: string; types: string } {
+  /** Ubicación de la celda en solo lectura («Sede / Zona»). */
+  get cellEditLocation(): string {
+    const celda = this.cellEditCell;
+    return celda ? `${celda.site_name} / ${celda.zone_name}` : '';
+  }
+
+  /** Estado operativo de la celda en solo lectura. */
+  get cellEditStateLabel(): string {
+    const celda = this.cellEditCell;
+    if (!celda) return '';
+    return celda.occupied ? 'Ocupada · Por movimiento activo' : 'Disponible · Sin movimiento activo';
+  }
+
+  /** Errores de validación del formulario de edición (la zona queda fija). */
+  get cellEditErrors(): { code: string; types: string } {
     if (!this.cellEditAttempted || this.cellEditBlocked) {
-      return { zone: '', code: '', types: '' };
+      return { code: '', types: '' };
     }
     return {
-      zone: this.cellEditForm.zone_id ? '' : 'Selecciona una zona de la sede elegida.',
       code: this.cellEditForm.code.trim() ? '' : 'El código es obligatorio.',
       types: this.cellEditForm.compatible_type_ids.length
         ? ''
@@ -1367,6 +1463,18 @@ export class App implements OnInit {
     const celda = this.cellMaintCell;
     if (!celda) return 'Selecciona una celda para continuar.';
     return `${this.parkingName || 'Parqueadero'} / ${celda.site_name} / ${celda.zone_name} / ${celda.code}`;
+  }
+
+  /** Título en forma de pregunta del panel de mantenimiento (Figma). */
+  get cellMaintTitle(): string {
+    const celda = this.cellMaintCell;
+    return celda ? `¿Pasar ${celda.code} a mantenimiento?` : 'Pasar a mantenimiento';
+  }
+
+  /** Título en forma de pregunta del panel de retorno (Figma). */
+  get cellFreeTitle(): string {
+    const celda = this.cellFreeCell;
+    return celda ? `¿Devolver ${celda.code} a disponible?` : 'Devolver a disponible';
   }
 
   /** Contexto del panel de retorno a disponible. */
@@ -2019,7 +2127,10 @@ export class App implements OnInit {
       next: (data) => {
         this.bootstrap = data;
         this.selectedLotId = data.parking_lot.id;
+        // El bootstrap ya trae las sedes: evita una petición /sites redundante.
+        this.sites = data.sites;
         this.zoneForm.site_id = data.sites[0]?.id ?? 0;
+        if (!this.lotZoneForm.site_id) this.lotZoneForm.site_id = data.sites[0]?.id ?? 0;
         this.cellForm.zone_id = 0;
         this.parkingName = data.parking_lot.name;
         this.parkingTaxId = data.parking_lot.tax_id ?? '';
@@ -2030,6 +2141,7 @@ export class App implements OnInit {
           },
           error: (err: unknown) => this.fail(err),
         });
+        this.loadAdminZones();
         this.refreshLists();
         this.changeDetector.detectChanges();
       },
@@ -2106,7 +2218,8 @@ export class App implements OnInit {
     this.api.cells().subscribe({
       next: (data) => {
         this.cells = data;
-        this.loadInventoryEvents();
+        // Los eventos de inventario solo se consultan si esa vista está abierta.
+        if (this.page === 'cells' && this.cellsTab === 'inventory') this.loadInventoryEvents();
         this.changeDetector.detectChanges();
       },
       error: (err: unknown) => this.fail(err),
@@ -2151,39 +2264,18 @@ export class App implements OnInit {
       },
       error: (err: unknown) => this.fail(err),
     });
-    this.api.sites().subscribe({
-      next: (data) => {
-        this.sites = data;
-        if (!this.zoneForm.site_id) this.zoneForm.site_id = data[0]?.id ?? 0;
-        if (!this.lotZoneForm.site_id) this.lotZoneForm.site_id = data[0]?.id ?? 0;
-        this.loadZones();
-        this.loadAdminZones();
-        this.loadMapZones();
-        this.changeDetector.detectChanges();
-      },
-      error: (err: unknown) => this.fail(err),
-    });
     this.loadParkingLots();
   }
 
-  loadZones(): void {
-    if (!this.zoneForm.site_id && this.siteId) this.zoneForm.site_id = this.siteId;
-    this.cellForm.zone_id = 0;
-    this.api.zones(this.zoneForm.site_id || this.siteId).subscribe({
-      next: (data) => {
-        this.zones = data;
-        this.cellForm.zone_id = data[0]?.id ?? 0;
-        this.changeDetector.detectChanges();
-      },
-      error: (err: unknown) => this.fail(err),
-    });
-  }
-
-  /** Zonas del parqueadero activo, usadas por los módulos de administración. */
-  loadAdminZones(): void {
+  /** Zonas del parqueadero activo, usadas por inventario y administración. */
+  loadAdminZones(force = false): void {
+    if (!force && this.adminZonesLotId === this.selectedLotId && this.adminZones.length) return;
     this.api.zones().subscribe({
       next: (data) => {
+        this.adminZonesLotId = this.selectedLotId;
         this.adminZones = data;
+        // `zones` es un superconjunto por sede; antes se pedía por sede aparte.
+        this.zones = data;
         if (!this.lotZoneForm.site_id) this.lotZoneForm.site_id = data[0]?.site_id ?? 0;
         if (!this.lotCellForm.zone_id) this.lotCellForm.zone_id = data[0]?.id ?? 0;
         this.changeDetector.detectChanges();
@@ -2208,6 +2300,8 @@ export class App implements OnInit {
           this.selectedLotId = session.parking_lot_id;
           this.api.setParkingLot(session.parking_lot_id);
         }
+        // La respuesta HTTP puede resolverse fuera de NgZone: refrescar la vista.
+        this.changeDetector.detectChanges();
         if (this.auth.mustChangePassword()) {
           void this.router.navigate(['/change-password']);
         } else {
@@ -2218,6 +2312,7 @@ export class App implements OnInit {
       error: (error: unknown) => {
         this.loginBusy = false;
         this.loginError = this.errorDetail(error);
+        this.changeDetector.detectChanges();
       },
     });
   }
@@ -2234,12 +2329,14 @@ export class App implements OnInit {
       next: () => {
         this.changeBusy = false;
         this.changeForm = { currentPassword: '', newPassword: '' };
+        this.changeDetector.detectChanges();
         this.loadAll();
         void this.router.navigate(['/dashboard']);
       },
       error: (error: unknown) => {
         this.changeBusy = false;
         this.changeError = this.errorDetail(error);
+        this.changeDetector.detectChanges();
       },
     });
   }
@@ -2263,6 +2360,11 @@ export class App implements OnInit {
     this.search = '';
     this.vehicleStatusFilter = 'TODAS';
     this.historyPage = 1;
+    if (page === 'history') {
+      // Enlace «Ver movimiento»: la placa llega pendiente desde la celda.
+      this.historyPlate = this.historyPlatePending;
+      this.historyPlatePending = '';
+    }
     this.error = '';
     this.clearNotice();
     this.scrollWorkspaceToTop();
@@ -2271,7 +2373,8 @@ export class App implements OnInit {
       this.entryZoneId = 0;
     }
     if (page === 'cells') {
-      this.loadMapZones();
+      // El mapa solo carga sus zonas cuando se abre esa pestaña.
+      if (this.cellsTab === 'map') this.loadMapZones();
       // Inventario y capacidad: filtros en su estado inicial (sede por defecto).
       this.clearInvFilters();
     }
@@ -2719,7 +2822,7 @@ export class App implements OnInit {
     const celda = this.cellEditCell;
     if (!celda || this.cellEditBlocked) return;
     const errores = this.cellEditErrors;
-    if (errores.code || errores.zone || errores.types) return;
+    if (errores.code || errores.types) return;
     this.api
       .updateCell(celda.id, {
         zone_id: this.cellEditForm.zone_id,
@@ -2831,7 +2934,7 @@ export class App implements OnInit {
       next: () => {
         this.zoneForm.name = '';
         this.done('Zona creada.');
-        this.loadZones();
+        this.loadAdminZones(true);
       },
       error: (err: unknown) => this.fail(err),
     });
@@ -3026,7 +3129,7 @@ export class App implements OnInit {
         next: () => {
           this.lotZoneForm = { site_id: siteId, name: '', code: '' };
           this.done('Zona creada. Ahora agrega las celdas físicas.');
-          this.loadAdminZones();
+          this.loadAdminZones(true);
           this.loadParkingLots();
         },
         error: (err: unknown) => this.fail(err),

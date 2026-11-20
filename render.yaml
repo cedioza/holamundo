@@ -33,6 +33,14 @@ services:
         fromDatabase:
           name: autos-colombia-db
           property: connectionString
+      # Secreto de firma de sesiones: Render lo genera una vez y lo conserva en
+      # el servicio. Nunca se versiona su valor. Si se rota, se invalidan los
+      # tokens activos (los usuarios deben iniciar sesión de nuevo).
+      # Local: exporta SESSION_SECRET con al menos 32 caracteres aleatorios,
+      # p. ej. con `python -c "import secrets; print(secrets.token_urlsafe(48))"`,
+      # y guárdalo solo en tu entorno/.env local (nunca en el repositorio).
+      - key: SESSION_SECRET
+        generateValue: true
       # Arranca con un solo proceso: el plan free tiene 512 MB de RAM.
       - key: WEB_CONCURRENCY
         value: "1"

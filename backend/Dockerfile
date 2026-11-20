@@ -19,6 +19,7 @@ COPY app ./app
 # Render inyecta PORT (por defecto 10000); en docker-compose se fija en 8000.
 # El contenedor debe escuchar en 0.0.0.0 para recibir peticiones.
 
-# 1) Migraciones versionadas antes de aceptar tráfico.
+# 1) Las migraciones solo se ejecutan si AUTO_INIT_DB se activa explícitamente
+#    (entornos aislados). En producción el arranque no modifica la base.
 # 2) uvicorn escucha en todas las interfaces, como exige el contenedor.
-CMD ["sh", "-c", "alembic upgrade head && exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --workers ${WEB_CONCURRENCY:-1}"]
+CMD ["sh", "-c", "if [ \"${AUTO_INIT_DB:-0}\" = \"1\" ]; then alembic upgrade head || exit 1; fi; exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --workers ${WEB_CONCURRENCY:-1}"]

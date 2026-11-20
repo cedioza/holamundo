@@ -2615,13 +2615,12 @@
         </div>
 
         <section class="reg-grid">
-          <!-- 1 · Crear celda -->
-          <article class="panel reg-panel">
-            <p class="reg-kicker">Alta · Nueva celda</p>
+          <!-- 1 · Crear celda (Figma: «ALTA · NUEVA CELDA» / «VALIDACIONES») -->
+          <article class="panel reg-panel" id="cellCreatePanel">
+            <p class="reg-kicker">{{ cellCreateKicker }}</p>
             <div class="panel-head">
               <div>
-                <h2>Crear celda</h2>
-                <p>Cada código debe ser único dentro de su zona.</p>
+                <h2>{{ cellCreateTitle }}</h2>
               </div>
             </div>
 
@@ -2652,7 +2651,7 @@
               </div>
 
               <div class="campo" [class.campo--error]="!!cellCreateErrors.zone">
-                <label for="cellCreateZone">Zona *</label>
+                <label for="cellCreateZone">Zona de la sede *</label>
                 <select
                   id="cellCreateZone"
                   name="cellCreateZone"
@@ -2667,12 +2666,12 @@
                 @if (cellCreateErrors.zone) {
                   <span class="field-hint field-hint--error">{{ cellCreateErrors.zone }}</span>
                 } @else {
-                  <span class="field-hint">La zona define el bloque de códigos de la sede.</span>
+                  <span class="field-hint">Solo se muestran zonas de la sede seleccionada.</span>
                 }
               </div>
 
               <div class="campo" [class.campo--error]="!!cellCreateErrors.code">
-                <label for="cellCreateCode">Código de celda *</label>
+                <label for="cellCreateCode">Código único dentro de la zona *</label>
                 <input
                   id="cellCreateCode"
                   name="cellCreateCode"
@@ -2690,7 +2689,7 @@
               </div>
 
               <fieldset class="type-options" [class.campo--error]="!!cellCreateErrors.types">
-                <legend>Tipos compatibles *</legend>
+                <legend>Tipos de vehículo compatibles *</legend>
                 <div class="type-chips">
                   @for (type of vehicleTypes; track type.id) {
                     <label
@@ -2708,6 +2707,8 @@
                 </div>
                 @if (cellCreateErrors.types) {
                   <span class="field-hint field-hint--error">{{ cellCreateErrors.types }}</span>
+                } @else {
+                  <span class="field-hint">Puedes seleccionar uno o varios tipos compatibles.</span>
                 }
               </fieldset>
 
@@ -2723,8 +2724,20 @@
                 <span class="field-hint">Visible para el equipo al consultar la celda.</span>
               </div>
 
+              <div class="campo">
+                <label for="cellCreateStatus">Estado inicial</label>
+                <input id="cellCreateStatus" name="cellCreateStatus" value="Disponible" readonly />
+                <span class="field-hint">
+                  Es el único estado en el alta: no se puede elegir Ocupada.
+                </span>
+              </div>
+
               <div class="reg-actions">
-                <button class="button button-primary" type="submit">
+                <button
+                  class="button button-primary"
+                  type="submit"
+                  [disabled]="cellCreateAttempted && !cellCreateValid"
+                >
                   Crear celda{{ cellForm.code ? ' ' + cellForm.code : '' }}
                 </button>
                 <button class="button button-secondary" type="button" (click)="openCreateCell()">
@@ -2734,15 +2747,24 @@
             </form>
           </article>
 
-          <!-- 2 · Editar celda -->
-          <article class="panel reg-panel">
+          <!-- 2 · Editar celda (Figma: «EDICIÓN» · «CONSULTA · bloqueo») -->
+          <article class="panel reg-panel" id="cellEditPanel">
             <p class="reg-kicker">{{ cellEditKicker }}</p>
             <div class="panel-head">
               <div>
-                <h2>Editar celda</h2>
-                <p>{{ cellEditContext }}</p>
+                <h2>{{ cellEditTitle }}</h2>
               </div>
             </div>
+
+            @if (cellEditCell) {
+              <span
+                class="map-pill"
+                [class.map-pill--free]="!cellEditCell.occupied"
+                [class.map-pill--busy]="cellEditCell.occupied"
+              >
+                {{ cellEditBadge }}
+              </span>
+            }
 
             @if (cellEditNotice) {
               <p class="reg-notice reg-notice--ok">{{ cellEditNotice }}</p>
@@ -2766,31 +2788,81 @@
             @if (!cellEditCell) {
               <p class="map-detail-empty">Selecciona una celda para editarla.</p>
             } @else if (cellEditBlocked) {
-              <p class="reg-notice reg-notice--warn">
-                No puedes editar una celda ocupada. Registra primero la salida del vehículo.
-              </p>
+              <!-- Celda ocupada · todo en solo lectura -->
+              <div class="campo">
+                <label for="cellEditBlockedPlace">Sede / zona</label>
+                <input id="cellEditBlockedPlace" value="{{ cellEditLocation }}" readonly />
+              </div>
+
+              <div class="campo">
+                <label for="cellEditBlockedCode">Código</label>
+                <input id="cellEditBlockedCode" [value]="cellEditCell.code" readonly />
+              </div>
+
+              <fieldset class="type-options">
+                <legend>Tipos de vehículo compatibles *</legend>
+                <div class="type-chips">
+                  @for (type of vehicleTypes; track type.id) {
+                    <label
+                      class="type-chip"
+                      [class.type-chip--on]="cellEditCell.compatible_types.some(c => c.id === type.id)"
+                    >
+                      <input type="checkbox" disabled [checked]="cellEditCell.compatible_types.some(c => c.id === type.id)" />
+                      <span>{{ type.name }}</span>
+                    </label>
+                  }
+                </div>
+                <span class="field-hint">Edición bloqueada mientras la celda esté ocupada.</span>
+              </fieldset>
+
+              <div class="campo">
+                <label for="cellEditBlockedState">Estado</label>
+                <input id="cellEditBlockedState" [value]="cellEditStateLabel" readonly />
+              </div>
+
+              <div class="reg-note reg-note--danger">
+                <strong>No puedes modificar una celda ocupada</strong>
+                <span>
+                  Código, sede, zona y compatibilidad están bloqueados. Tampoco puedes cambiarla a
+                  Mantenimiento. Registra primero la salida del vehículo.
+                </span>
+              </div>
+
+              <div class="reg-actions">
+                <button class="button button-primary" type="button" disabled>
+                  Guardar cambios
+                </button>
+                <button class="button button-primary" type="button" disabled>Mantenimiento</button>
+              </div>
+
+              @if (cellEditCell.vehicle_plate) {
+                <button
+                  class="button button-secondary"
+                  type="button"
+                  (click)="openCellMovement()"
+                >
+                  Ver movimiento {{ cellEditCell.vehicle_plate }}
+                </button>
+              }
             } @else {
               <form class="stack-form" (ngSubmit)="saveCellEdit()">
-                <div class="campo" [class.campo--error]="!!cellEditErrors.zone">
-                  <label for="cellEditZone">Zona *</label>
-                  <select
-                    id="cellEditZone"
-                    name="cellEditZone"
-                    [ngModel]="cellEditForm.zone_id"
-                    (ngModelChange)="cellEditForm.zone_id = $event"
-                  >
-                    <option [ngValue]="0">— Selecciona —</option>
-                    @for (zone of cellEditZoneOptions; track zone.id) {
-                      <option [ngValue]="zone.id">{{ zone.name }}</option>
-                    }
+                <div class="campo">
+                  <label for="cellEditSite">Sede *</label>
+                  <select id="cellEditSite" name="cellEditSite" [ngModel]="cellEditCell.site_id" disabled>
+                    <option [ngValue]="cellEditCell.site_id">{{ cellEditCell.site_name }}</option>
                   </select>
-                  @if (cellEditErrors.zone) {
-                    <span class="field-hint field-hint--error">{{ cellEditErrors.zone }}</span>
-                  }
+                </div>
+
+                <div class="campo">
+                  <label for="cellEditZone">Zona de la sede *</label>
+                  <select id="cellEditZone" name="cellEditZone" [ngModel]="cellEditForm.zone_id" disabled>
+                    <option [ngValue]="cellEditForm.zone_id">{{ cellEditCell.zone_name }}</option>
+                  </select>
+                  <span class="field-hint">Solo se muestran zonas de la sede seleccionada.</span>
                 </div>
 
                 <div class="campo" [class.campo--error]="!!cellEditErrors.code">
-                  <label for="cellEditCode">Código de celda *</label>
+                  <label for="cellEditCode">Código único dentro de la zona *</label>
                   <input
                     id="cellEditCode"
                     name="cellEditCode"
@@ -2801,11 +2873,15 @@
                     <span class="field-hint field-hint--error">{{ cellEditErrors.code }}</span>
                   } @else if (cellEditServerCodeError) {
                     <span class="field-hint field-hint--error">{{ cellEditServerCodeError }}</span>
+                  } @else {
+                    <span class="field-hint">
+                      No se permite reutilizar el código mientras exista otra celda en esta zona.
+                    </span>
                   }
                 </div>
 
                 <fieldset class="type-options" [class.campo--error]="!!cellEditErrors.types">
-                  <legend>Tipos compatibles *</legend>
+                  <legend>Tipos de vehículo compatibles *</legend>
                   <div class="type-chips">
                     @for (type of vehicleTypes; track type.id) {
                       <label
@@ -2823,6 +2899,8 @@
                   </div>
                   @if (cellEditErrors.types) {
                     <span class="field-hint field-hint--error">{{ cellEditErrors.types }}</span>
+                  } @else {
+                    <span class="field-hint">Puedes seleccionar uno o varios tipos compatibles.</span>
                   }
                 </fieldset>
 
@@ -2839,7 +2917,7 @@
 
                 <div class="reg-actions">
                   <button class="button button-primary" type="submit">
-                    Guardar cambios de {{ cellEditCell?.code }}
+                    Guardar cambios de {{ cellEditCell.code }}
                   </button>
                   <button
                     class="button button-secondary"
@@ -2849,25 +2927,27 @@
                     Cancelar edición
                   </button>
                 </div>
+
+                <span class="field-hint">
+                  Solo se editan los datos de {{ cellEditCell.code }}. La ocupación se determina
+                  mediante ingresos y salidas.
+                </span>
               </form>
             }
           </article>
 
-          <!-- 3 · Pasar a mantenimiento -->
+          <!-- 3 · Pasar a mantenimiento (Figma: «¿Pasar X a mantenimiento?») -->
           <article class="panel reg-panel">
             <p class="reg-kicker">Cambio operativo · Disponible → Mantenimiento</p>
             <div class="panel-head">
               <div>
-                <h2>Pasar a mantenimiento</h2>
+                <h2>{{ cellMaintTitle }}</h2>
                 <p>{{ cellMaintContext }}</p>
               </div>
             </div>
 
             @if (cellMaintNotice) {
-              <p class="reg-notice reg-notice--ok">
-                {{ cellMaintNotice }}
-                <span>Inventario actual: {{ inventorySummaryCounts }}</span>
-              </p>
+              <p class="reg-notice reg-notice--ok">{{ cellMaintNotice }}</p>
             }
 
             <div class="campo">
@@ -2911,7 +2991,7 @@
                   @if (cellMaintAttempted && !cellMaintReason.trim()) {
                     <span class="field-hint field-hint--error">El motivo es obligatorio.</span>
                   } @else {
-                    <span class="field-hint">Si está vacío, no se confirma el cambio.</span>
+                    <span class="field-hint">El motivo queda visible en la ficha de la celda.</span>
                   }
                 </div>
 
@@ -2935,6 +3015,8 @@
                     Cancelar
                   </button>
                 </div>
+
+                <span class="reg-result">Inventario actual · {{ inventorySummaryCounts }}</span>
               </form>
 
               @if (cellMaintBlockNote) {
@@ -2953,21 +3035,18 @@
             }
           </article>
 
-          <!-- 4 · Devolver a disponible -->
+          <!-- 4 · Devolver a disponible (Figma: «¿Devolver X a disponible?») -->
           <article class="panel reg-panel">
             <p class="reg-kicker">Cambio operativo · Mantenimiento → Disponible</p>
             <div class="panel-head">
               <div>
-                <h2>Devolver a disponible</h2>
+                <h2>{{ cellFreeTitle }}</h2>
                 <p>{{ cellFreeContext }}</p>
               </div>
             </div>
 
             @if (cellFreeNotice) {
-              <p class="reg-notice reg-notice--ok">
-                {{ cellFreeNotice }}
-                <span>Inventario actual: {{ inventorySummaryCounts }}</span>
-              </p>
+              <p class="reg-notice reg-notice--ok">{{ cellFreeNotice }}</p>
             }
 
             <div class="campo">
@@ -3011,7 +3090,9 @@
                   @if (cellFreeAttempted && !cellFreeReason.trim()) {
                     <span class="field-hint field-hint--error">El motivo es obligatorio.</span>
                   } @else {
-                    <span class="field-hint">Si está vacío, no se confirma el retorno.</span>
+                    <span class="field-hint">
+                      El motivo de devolución queda visible en la ficha de la celda.
+                    </span>
                   }
                 </div>
 
@@ -3035,6 +3116,8 @@
                     Cancelar
                   </button>
                 </div>
+
+                <span class="reg-result">Inventario actual · {{ inventorySummaryCounts }}</span>
               </form>
 
               @if (cellFreeBlockNote) {
@@ -3071,9 +3154,12 @@
 
         <div class="history-header">
           <div class="history-header-main">
-            <h1>Historial de {{ movements[0]?.plate || 'vehículo' }}</h1>
+            <h1>Historial de {{ historyPlate || movements[0]?.plate || 'vehículo' }}</h1>
             <p>
-              @if (movements[0]) {
+              @if (historyPlate) {
+                Movimientos de {{ historyPlate }} · {{ historyMovements.length }}
+                registro(s) · {{ mapSiteName }}
+              } @else if (movements[0]) {
                 {{ movements[0].brand }} · {{ movements[0].color }} · Automóvil · {{ movements[0].customer_name }} · {{ mapSiteName }}
               } @else {
                 Consulta el historial completo de movimientos, pagos y novedades por vehículo.
@@ -3092,7 +3178,7 @@
         <div class="history-filters">
           <label class="history-search">
             <img src="/icons/search.svg" alt="" width="16" height="16" />
-            <input type="search" placeholder="Buscar placa, cliente o documento" [value]="movements[0]?.plate || ''" readonly />
+            <input type="search" placeholder="Buscar placa, cliente o documento" [value]="historyPlate || movements[0]?.plate || ''" readonly />
           </label>
           <label class="history-filter">
             <span>1–20 oct 2026</span>
@@ -3104,11 +3190,11 @@
           </label>
         </div>
 
-        @if (activeMovements.length) {
+        @if (historyActiveMovement; as activo) {
           <div class="message message--info">
             <p class="message-title">ⓘ Movimiento activo · Salida pendiente</p>
             <p class="message-body">
-              {{ activeMovements[0].plate }} ingresó el {{ activeMovements[0].entered_at | date: 'd \'de\' MMMM \'a las\' HH:mm' : '' : 'es-CO' }} · Celda {{ activeMovements[0].cell_code }} · {{ movementOwner(activeMovements[0]) }}. El cierre se realiza únicamente desde Registrar salida.
+              {{ activo.plate }} ingresó el {{ activo.entered_at | date: 'd \'de\' MMMM \'a las\' HH:mm' : '' : 'es-CO' }} · Celda {{ activo.cell_code }} · {{ movementOwner(activo) }}. El cierre se realiza únicamente desde Registrar salida.
             </p>
           </div>
         }
@@ -3160,10 +3246,10 @@
               </tbody>
             </table>
           </div>
-          @if (movements.length) {
+          @if (historyMovements.length) {
             <div class="pagination">
               <span class="pagination-summary">
-                {{ movements.length }} movimientos en el rango · Ordenados del más reciente al más antiguo
+                {{ historyMovements.length }} movimientos en el rango · Ordenados del más reciente al más antiguo
               </span>
               <div class="pagination-controls">
                 <button type="button" class="pagination-step" [disabled]="historyPage === 1" (click)="goToHistoryPage(historyPage - 1)">Anterior</button>
@@ -3176,7 +3262,13 @@
           } @else {
             <div class="table-empty">
               <img src="/icons/history.svg" alt="" width="16" height="16" />
-              <span>Aún no se registran movimientos.</span>
+              <span>
+                @if (historyPlate) {
+                  No hay movimientos registrados para {{ historyPlate }}.
+                } @else {
+                  Aún no se registran movimientos.
+                }
+              </span>
             </div>
           }
         </section>

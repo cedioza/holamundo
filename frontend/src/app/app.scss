@@ -1672,6 +1672,39 @@ textarea {
   background: #eaf1ff;
   color: var(--primary);
 }
+/* Figma «Celdas · Registro y configuración»: bloqueo por celda ocupada. */
+.reg-note--danger {
+  border-color: #f3ccd1;
+  background: #fdf0f1;
+  color: #b53643;
+}
+/* Línea de resultado fija bajo las acciones (paneles de cambio operativo). */
+.reg-result {
+  color: var(--ink-muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+/* Sede y zona fijas en la edición: el control se ve como select, no cambia. */
+.reg-panel select:disabled {
+  background-color: var(--white);
+  color: var(--ink);
+  opacity: 1;
+}
+/* Entradas de solo lectura del estado bloqueado (Figma usa fondo #f8fafd). */
+.reg-panel input[readonly] {
+  background: #f8fafd;
+  color: var(--ink-muted);
+}
+/* Acciones deshabilitadas del panel de consulta: sólidas, no atenuadas. */
+.reg-actions .button-primary:disabled {
+  background: #dfe6ef;
+  color: #62738b;
+  opacity: 1;
+}
+/* El enlace «Ver movimiento …» va suelto, alineado a la izquierda. */
+.reg-panel > .button-secondary {
+  align-self: flex-start;
+}
 .reg-last {
   display: flex;
   flex-direction: column;

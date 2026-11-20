@@ -105,8 +105,10 @@ if [[ ! -d "$ROOT/frontend/node_modules" ]]; then
     (cd "$ROOT/frontend" && npm ci)
 fi
 
-# Aplicar migraciones de la base de datos
-(cd "$ROOT/backend" && "$VENV_PY" -m alembic upgrade head)
+# Aplicar migraciones solo en entornos aislados activados explícitamente.
+if [[ "${AUTO_INIT_DB:-0}" == "1" ]]; then
+    (cd "$ROOT/backend" && "$VENV_PY" -m alembic upgrade head)
+fi
 
 # Iniciar backend y frontend
 (cd "$ROOT/backend" && "$VENV_PY" -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000) &

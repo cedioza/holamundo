@@ -22,6 +22,8 @@ if not parsed.scheme.startswith("postgresql"):
 os.environ["DATABASE_URL"] = configured.rsplit("/", 1)[0] + "/autos_colombia_test"
 # Firma determinista solo para la suite; Nunca se usa en producción.
 os.environ["SESSION_SECRET"] = "test-only-secret-" + "x" * 40
+# La suite usa una BD aislada: ahí sí se permite la inicialización automática.
+os.environ["AUTO_INIT_DB"] = "1"
 
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402

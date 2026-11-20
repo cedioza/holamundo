@@ -60,11 +60,10 @@ def test_role_catalog_is_canonical_and_has_only_two_roles(client):
     for permission in ("OPERATE", "VIEW_AVAILABILITY", "MANAGE_ACCOUNTS", "MANAGE_STRUCTURE",
                        "MANAGE_CELLS", "VIEW_ACTIVITY", "VIEW_HISTORY"):
         assert permission in admin["permissions"]
-    for permission in ("MANAGE_ACCOUNTS", "MANAGE_STRUCTURE", "MANAGE_CELLS",
-                       "VIEW_ACTIVITY", "VIEW_HISTORY"):
+    for permission in ("MANAGE_ACCOUNTS", "MANAGE_STRUCTURE", "VIEW_ACTIVITY", "VIEW_HISTORY"):
         assert permission not in employee["permissions"]
-    assert "OPERATE" in employee["permissions"]
-    assert "VIEW_AVAILABILITY" in employee["permissions"]
+    for permission in ("OPERATE", "VIEW_AVAILABILITY", "MANAGE_CELLS"):
+        assert permission in employee["permissions"]
 
 
 def test_create_user_hashes_password_and_forces_change(client):
@@ -113,8 +112,8 @@ def test_admin_can_manage_accounts_and_records_activity(client):
     assert all(item["actor"] == "Administrador de prueba" for item in activity)
 
 
-def test_employee_is_denied_admin_endpoints_but_can_operate(employee_client):
-    """EMPLEADO opera normalmente; administración y configuración devuelven 403."""
+def test_employee_is_denied_admin_endpoints_but_can_operate_and_manage_cells(employee_client):
+    """EMPLEADO opera y gestiona celdas; el resto de administración devuelve 403."""
     forbidden = [
         ("get", "/api/users", None),
         ("get", "/api/roles", None),
@@ -124,7 +123,6 @@ def test_employee_is_denied_admin_endpoints_but_can_operate(employee_client):
         ("get", "/api/employees", None),
         ("get", "/api/shifts", None),
         ("post", "/api/parking-lots", {"name": "No permitido"}),
-        ("post", "/api/cells", {"zone_id": 1, "code": "X-01", "compatible_type_ids": [1]}),
         ("post", "/api/users", {"username": "x", "password": "y", "role_ids": []}),
     ]
     for method, path, body in forbidden:
@@ -135,6 +133,13 @@ def test_employee_is_denied_admin_endpoints_but_can_operate(employee_client):
                  "/api/movements", "/api/novelties", "/api/activity"):
         response = employee_client.get(path)
         assert response.status_code == 200, f"{path}: {response.status_code} {response.text}"
+
+    cell = employee_client.post("/api/cells", json={
+        "zone_id": 1, "code": "EMP-01", "compatible_type_ids": [1],
+    })
+    assert cell.status_code == 201, cell.text
+    edited = employee_client.patch(f"/api/cells/{cell.json()['id']}", json={"code": "EMP-01-R"})
+    assert edited.status_code == 200, edited.text
 
     customer = employee_client.post("/api/customers", json={
         "parking_lot_id": 1, "document_type": "CC", "document_number": "EMP-001",
@@ -247,7 +252,7 @@ def test_laura_admin_oscar_employee_and_inactive_account(initial_accounts):
     oscar_me = oscar.get("/api/auth/me").json()
     assert oscar_me["display_name"] == "Oscar Valencia"
     assert oscar_me["role_codes"] == [ROLE_EMPLOYEE]
-    assert oscar_me["permissions"] == ["OPERATE", "VIEW_AVAILABILITY"]
+    assert oscar_me["permissions"] == ["MANAGE_CELLS", "OPERATE", "VIEW_AVAILABILITY"]
     assert oscar.get("/api/cells").status_code == 200
     assert oscar.get("/api/customers").status_code == 200
     assert oscar.get("/api/users").status_code == 403
@@ -256,7 +261,7 @@ def test_laura_admin_oscar_employee_and_inactive_account(initial_accounts):
     assert oscar.post("/api/parking-lots", json={"name": "No permitido"}).status_code == 403
     assert oscar.post("/api/cells", json={
         "zone_id": 1, "code": "OSCAR-01", "compatible_type_ids": [1],
-    }).status_code == 403
+    }).status_code == 201
 
     deactivated = laura.patch(f"/api/users/{initial_accounts['oscar_id']}/status", json={"active": False})
     assert deactivated.status_code == 200, deactivated.text

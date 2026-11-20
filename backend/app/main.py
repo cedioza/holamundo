@@ -2,6 +2,7 @@ from calendar import monthrange
 from contextlib import asynccontextmanager
 from datetime import date, datetime, timedelta, time
 from decimal import Decimal
+import os
 import re
 from typing import Any
 
@@ -40,14 +41,25 @@ from .views import ensure_reporting_views
 ACTOR_HEADER = "X-Actor-Username"
 
 
+#: La creación de esquema y los datos de demostración solo se permiten de forma
+#: explícita en entornos aislados (por ejemplo, autos_colombia_test). Con la BD
+#: principal el arranque es de solo lectura: no crea tablas, vistas ni registros.
+AUTO_INIT_ENV = "AUTO_INIT_DB"
+
+
+def auto_init_enabled() -> bool:
+    return os.getenv(AUTO_INIT_ENV, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    Base.metadata.create_all(bind=engine)
-    # Las vistas no viven en el metadata: se crean aparte (idempotente).
-    with engine.begin() as connection:
-        ensure_reporting_views(connection)
-    with Session(bind=engine) as db:
-        seed_database(db)
+    if auto_init_enabled():
+        Base.metadata.create_all(bind=engine)
+        # Las vistas no viven en el metadata: se crean aparte (idempotente).
+        with engine.begin() as connection:
+            ensure_reporting_views(connection)
+        with Session(bind=engine) as db:
+            seed_database(db)
     yield
 
 
@@ -61,6 +73,11 @@ async def attach_session_context(request: Request, call_next):
     Este middleware garantiza que `resolve_parking_lot`, la bitácora y las
     comprobaciones heredadas vean al mismo usuario autenticado.
     """
+    # El principal validado se guarda en la request para que `authenticate`
+    # reutilice el trabajo de este middleware (roles + empleado) en lugar de
+    # repetir dos consultas por petición. Las validaciones siguen en ambas capas.
+    request.state.principal = None
+    request.state.auth_token = None
     header = request.headers.get("authorization", "")
     scheme, _, token = header.partition(" ")
     if scheme.lower() == "bearer" and token.strip():
@@ -70,7 +87,10 @@ async def attach_session_context(request: Request, call_next):
                 user = session.get(UserAccount, payload.get("uid"))
                 if user and user.active and user.username == payload.get("sub") \
                         and user.parking_lot_id == payload.get("lot"):
-                    current_principal.set(build_principal(session, user))
+                    principal = build_principal(session, user)
+                    current_principal.set(principal)
+                    request.state.principal = principal
+                    request.state.auth_token = token.strip()
     return await call_next(request)
 
 
@@ -78,10 +98,14 @@ async def attach_session_context(request: Request, call_next):
 app.include_router(auth_router)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:4200", "http://127.0.0.1:4200"],
+    allow_origins=[
+        "https://autos-colombia-web.onrender.com",
+        "http://localhost:4200",
+        "http://127.0.0.1:4200",
+    ],
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type"],
 )
 
 
@@ -490,13 +514,62 @@ def latest_contract(db: Session, vehicle_id: int) -> MonthlyContract | None:
                      .order_by(MonthlyContract.expires_on.desc()).limit(1))
 
 
-def vehicle_payload(db: Session, vehicle: Vehicle) -> dict[str, Any]:
+#: Centinela para distinguir "no se pasó el dato" de "se pasó None" (sin contrato
+#: o sin movimiento) en los payloads con datos precargados.
+_UNSET = object()
+
+
+def contract_maps(db: Session, vehicle_ids: list[int]) -> tuple[dict[int, MonthlyContract], dict[int, MonthlyContract]]:
+    """Contratos vigentes y de referencia por vehículo en una sola consulta."""
+    if not vehicle_ids:
+        return {}, {}
     today = date.today()
-    contract = current_contract(db, vehicle.id)
-    displayed_contract = contract or latest_contract(db, vehicle.id)
+    contracts = db.scalars(
+        select(MonthlyContract)
+        .where(MonthlyContract.vehicle_id.in_(vehicle_ids), MonthlyContract.status == "ACTIVE")
+        .order_by(MonthlyContract.expires_on)
+    ).unique().all()
+    current: dict[int, MonthlyContract] = {}
+    latest: dict[int, MonthlyContract] = {}
+    for contract in contracts:
+        vehicle_id = contract.vehicle_id
+        latest[vehicle_id] = contract
+        if contract.starts_on <= today < contract.expires_on:
+            current[vehicle_id] = contract
+    return current, latest
+
+
+def active_movement_map(db: Session, vehicle_ids: list[int]) -> dict[int, Movement]:
+    """Movimiento activo por vehículo, con su celda, en una sola consulta."""
+    if not vehicle_ids:
+        return {}
+    movements = db.scalars(
+        select(Movement)
+        .where(Movement.vehicle_id.in_(vehicle_ids), Movement.exited_at.is_(None))
+        .options(joinedload(Movement.cell))
+    ).unique().all()
+    return {movement.vehicle_id: movement for movement in movements}
+
+
+def vehicle_payload(
+    db: Session,
+    vehicle: Vehicle,
+    contract: MonthlyContract | None | object = _UNSET,
+    fallback_contract: MonthlyContract | None = None,
+    active_movement: Movement | None | object = _UNSET,
+) -> dict[str, Any]:
+    today = date.today()
+    if contract is _UNSET:
+        contract = current_contract(db, vehicle.id)
+        fallback_contract = latest_contract(db, vehicle.id)
+    displayed_contract = contract or fallback_contract
     upcoming = displayed_contract is not None and displayed_contract.starts_on > today
     monthly_status = "VIGENTE" if contract else "ANTICIPADA" if upcoming else "VENCIDA"
-    active_movement = db.scalar(select(Movement).where(Movement.vehicle_id == vehicle.id, Movement.exited_at.is_(None)))
+    if active_movement is _UNSET:
+        active_movement = db.scalar(
+            select(Movement).where(Movement.vehicle_id == vehicle.id, Movement.exited_at.is_(None))
+            .options(joinedload(Movement.cell))
+        )
     return {
         "id": vehicle.id, "parking_lot_id": vehicle.parking_lot_id, "customer_id": vehicle.customer_id,
         "customer_name": vehicle.customer.full_name, "vehicle_type_id": vehicle.vehicle_type_id,
@@ -516,7 +589,13 @@ def list_vehicles(parking_lot_id: int | None = None, search: str = "", inside: b
     if search:
         stmt = stmt.where(Vehicle.plate.ilike(f"%{search.strip()}%"))
     vehicles = db.scalars(stmt.order_by(Vehicle.plate)).unique().all()
-    result = [vehicle_payload(db, vehicle) for vehicle in vehicles]
+    vehicle_ids = [vehicle.id for vehicle in vehicles]
+    current_map, latest_map = contract_maps(db, vehicle_ids)
+    movements_map = active_movement_map(db, vehicle_ids)
+    result = [
+        vehicle_payload(db, vehicle, current_map.get(vehicle.id), latest_map.get(vehicle.id), movements_map.get(vehicle.id))
+        for vehicle in vehicles
+    ]
     return [item for item in result if inside is None or item["inside"] is inside]
 
 
@@ -559,13 +638,43 @@ def list_contracts(parking_lot_id: int | None = None, db: Session = Depends(get_
         .options(joinedload(Vehicle.customer), joinedload(Vehicle.vehicle_type))
         .order_by(Vehicle.plate)
     ).unique().all()
+    vehicle_ids = [vehicle.id for vehicle in vehicles]
+    contracts_by_vehicle: dict[int, list[MonthlyContract]] = {vehicle_id: [] for vehicle_id in vehicle_ids}
+    if vehicle_ids:
+        for contract in db.scalars(
+            select(MonthlyContract)
+            .where(MonthlyContract.vehicle_id.in_(vehicle_ids))
+            .order_by(MonthlyContract.starts_on.desc(), MonthlyContract.expires_on.desc())
+        ).unique().all():
+            contracts_by_vehicle[contract.vehicle_id].append(contract)
+        payment_rows = db.execute(
+            select(Payment, MonthlyContract.vehicle_id)
+            .join(MonthlyContract, Payment.contract_id == MonthlyContract.id)
+            .where(MonthlyContract.vehicle_id.in_(vehicle_ids))
+            .order_by(Payment.paid_at.desc())
+        ).all()
+    else:
+        payment_rows = []
+    payments_by_vehicle: dict[int, list[Payment]] = {vehicle_id: [] for vehicle_id in vehicle_ids}
+    for payment, vehicle_id in payment_rows:
+        payments_by_vehicle[vehicle_id].append(payment)
+    type_ids = {vehicle.vehicle_type_id for vehicle in vehicles}
+    tariffs: dict[int, MonthlyTariff] = {}
+    if type_ids:
+        for tariff in db.scalars(
+            select(MonthlyTariff)
+            .where(
+                MonthlyTariff.parking_lot_id == lot_id,
+                MonthlyTariff.vehicle_type_id.in_(type_ids),
+                MonthlyTariff.effective_from <= today,
+                (MonthlyTariff.effective_until.is_(None)) | (MonthlyTariff.effective_until >= today),
+            )
+            .order_by(MonthlyTariff.effective_from.desc())
+        ).unique().all():
+            tariffs.setdefault(tariff.vehicle_type_id, tariff)
     rows: list[dict[str, Any]] = []
     for vehicle in vehicles:
-        contracts = db.scalars(
-            select(MonthlyContract)
-            .where(MonthlyContract.vehicle_id == vehicle.id)
-            .order_by(MonthlyContract.starts_on.desc(), MonthlyContract.expires_on.desc())
-        ).all()
+        contracts = contracts_by_vehicle[vehicle.id]
         current = next((item for item in contracts if item.starts_on <= today <= item.expires_on), None)
         latest = contracts[0] if contracts else None
         reference = current or latest
@@ -577,24 +686,9 @@ def list_contracts(parking_lot_id: int | None = None, db: Session = Depends(get_
             monthly_status = "ANTICIPADA"
         else:
             monthly_status = "VENCIDA"
-        payments = db.scalars(
-            select(Payment)
-            .join(MonthlyContract, Payment.contract_id == MonthlyContract.id)
-            .where(MonthlyContract.vehicle_id == vehicle.id)
-            .order_by(Payment.paid_at.desc())
-        ).all()
+        payments = payments_by_vehicle[vehicle.id]
         last_payment = payments[0] if payments else None
-        tariff = db.scalar(
-            select(MonthlyTariff)
-            .where(
-                MonthlyTariff.parking_lot_id == vehicle.parking_lot_id,
-                MonthlyTariff.vehicle_type_id == vehicle.vehicle_type_id,
-                MonthlyTariff.effective_from <= today,
-                (MonthlyTariff.effective_until.is_(None)) | (MonthlyTariff.effective_until >= today),
-            )
-            .order_by(MonthlyTariff.effective_from.desc())
-            .limit(1)
-        )
+        tariff = tariffs.get(vehicle.vehicle_type_id)
         rows.append({
             "vehicle_id": vehicle.id,
             "plate": vehicle.plate,
@@ -664,10 +758,19 @@ def create_zone(payload: ZoneCreate, parking_lot_id: int | None = None, db: Sess
     return {"id": zone.id, "site_id": zone.site_id, "name": zone.name, "code": zone.code}
 
 
-def cell_payload(db: Session, cell: Cell) -> dict[str, Any]:
-    movement = db.scalar(select(Movement).where(Movement.cell_id == cell.id, Movement.exited_at.is_(None)).options(joinedload(Movement.vehicle)))
-    zone = db.get(Zone, cell.zone_id)
-    site = db.get(Site, zone.site_id) if zone else None
+def cell_payload(
+    db: Session,
+    cell: Cell,
+    movement: Movement | None | object = _UNSET,
+    zone: Zone | None | object = _UNSET,
+    site: Site | None | object = _UNSET,
+) -> dict[str, Any]:
+    if movement is _UNSET:
+        movement = db.scalar(select(Movement).where(Movement.cell_id == cell.id, Movement.exited_at.is_(None)).options(joinedload(Movement.vehicle)))
+    if zone is _UNSET:
+        zone = db.get(Zone, cell.zone_id)
+    if site is _UNSET:
+        site = db.get(Site, zone.site_id) if zone else None
     return {
         "id": cell.id, "zone_id": cell.zone_id, "zone_name": zone.name if zone else "",
         "site_id": site.id if site else None, "site_name": site.name if site else "",
@@ -683,10 +786,24 @@ def cell_payload(db: Session, cell: Cell) -> dict[str, Any]:
 @app.get("/api/cells", dependencies=[Depends(permit("VIEW_AVAILABILITY"))])
 def list_cells(parking_lot_id: int | None = None, site_id: int | None = None, db: Session = Depends(get_db)) -> list[dict[str, Any]]:
     lot_id = resolve_parking_lot(db, parking_lot_id)
-    stmt = select(Cell).join(Zone).join(Site).options(joinedload(Cell.compatible_types)).where(Site.parking_lot_id == lot_id)
+    stmt = (
+        select(Cell).join(Zone).join(Site)
+        .options(joinedload(Cell.compatible_types), joinedload(Cell.zone).joinedload(Zone.site))
+        .where(Site.parking_lot_id == lot_id)
+    )
     if site_id:
         stmt = stmt.where(Site.id == site_id)
-    return [cell_payload(db, cell) for cell in db.scalars(stmt.order_by(Cell.code)).unique().all()]
+    cells = db.scalars(stmt.order_by(Cell.code)).unique().all()
+    cell_ids = [cell.id for cell in cells]
+    movements = db.scalars(
+        select(Movement).where(Movement.cell_id.in_(cell_ids), Movement.exited_at.is_(None))
+        .options(joinedload(Movement.vehicle))
+    ).unique().all() if cell_ids else []
+    movement_by_cell = {movement.cell_id: movement for movement in movements}
+    return [
+        cell_payload(db, cell, movement_by_cell.get(cell.id), cell.zone, cell.zone.site if cell.zone else None)
+        for cell in cells
+    ]
 
 
 @app.post("/api/cells", status_code=201, dependencies=[Depends(permit("MANAGE_CELLS"))])
@@ -925,11 +1042,15 @@ def build_report(
     site_ids = [site.id for site in db.scalars(select(Site).where(Site.parking_lot_id == lot_id)).all()]
     if site_id:
         site_ids = [site_id] if site_id in site_ids else []
-    zone_ids = [zone.id for zone in db.scalars(select(Zone).where(Zone.site_id.in_(site_ids))).all()] if site_ids else []
+    zones = db.scalars(select(Zone).where(Zone.site_id.in_(site_ids))).all() if site_ids else []
     if zone_id:
-        zone_ids = [zone_id] if zone_id in zone_ids else []
+        zones = [zone for zone in zones if zone.id == zone_id]
+    zone_ids = [zone.id for zone in zones]
+    zones_by_id = {zone.id: zone for zone in zones}
 
-    cells = db.scalars(select(Cell).where(Cell.zone_id.in_(zone_ids))).all() if zone_ids else []
+    cells = db.scalars(
+        select(Cell).where(Cell.zone_id.in_(zone_ids)).options(joinedload(Cell.compatible_types))
+    ).unique().all() if zone_ids else []
     cell_ids = [cell.id for cell in cells]
     active_cells = [cell for cell in cells if cell.operational_status == "ACTIVE"]
     maintenance_cells = [cell for cell in cells if cell.operational_status == "MAINTENANCE"]
@@ -993,8 +1114,7 @@ def build_report(
     payments = db.scalars(
         select(Payment).join(MonthlyContract).join(Vehicle)
         .where(Vehicle.parking_lot_id == lot_id, Payment.paid_at >= day_start, Payment.paid_at <= day_end)
-        .options(joinedload(Payment.contract).joinedload(MonthlyContract.vehicle))
-    ).unique().all()
+    ).all()
     payments_by_method: dict[str, dict[str, Any]] = {}
     for payment in payments:
         bucket = payments_by_method.setdefault(payment.method, {"method": payment.method, "amount": 0.0, "count": 0})
@@ -1009,18 +1129,23 @@ def build_report(
         vehicles = [item for item in vehicles if item.vehicle_type_id == vehicle_type_id]
     customers_count = db.scalar(select(func.count(Customer.id)).where(Customer.parking_lot_id == lot_id, Customer.active.is_(True))) or 0
     today = date.today()
+    active_contracts: dict[int, MonthlyContract] = {}
+    vehicle_ids = [vehicle.id for vehicle in vehicles]
+    if vehicle_ids:
+        for contract in db.scalars(
+            select(MonthlyContract).where(
+                MonthlyContract.vehicle_id.in_(vehicle_ids),
+                MonthlyContract.status == "ACTIVE",
+                MonthlyContract.starts_on <= today,
+                MonthlyContract.expires_on > today,
+            ).order_by(MonthlyContract.expires_on)
+        ).unique().all():
+            active_contracts[contract.vehicle_id] = contract
     expiring_soon = 0
     expired = 0
     active_monthly = 0
     for vehicle in vehicles:
-        contract = db.scalar(
-            select(MonthlyContract).where(
-                MonthlyContract.vehicle_id == vehicle.id,
-                MonthlyContract.status == "ACTIVE",
-                MonthlyContract.starts_on <= today,
-                MonthlyContract.expires_on > today,
-            ).order_by(MonthlyContract.expires_on.desc()).limit(1)
-        )
+        contract = active_contracts.get(vehicle.id)
         if contract:
             active_monthly += 1
             if (contract.expires_on - today).days <= 30:
@@ -1040,7 +1165,7 @@ def build_report(
         "entered_at": item.entered_at.isoformat(),
         "exited_at": item.exited_at.isoformat() if item.exited_at else None,
         "cell_code": item.cell.code,
-        "zone_name": db.get(Zone, item.cell.zone_id).name if item.cell.zone_id else "",
+        "zone_name": zones_by_id[item.cell.zone_id].name if item.cell.zone_id in zones_by_id else "",
         "entry_employee_id": item.entry_employee_id,
         "exit_employee_id": item.exit_employee_id,
         "entry_employee": employee_names.get(item.entry_employee_id),

@@ -12,8 +12,8 @@ delegated: Angular frontend, FastAPI backend, SQLAlchemy/Alembic, PostgreSQL for
 
 ## Users
 
-- Empleados que registran clientes, vehículos, pagos y movimientos durante la operación del parqueadero.
-- Administradores que configuran celdas, tarifas y empleados, y consultan ocupación e historial.
+- Empleados que registran clientes, vehículos, pagos y movimientos durante la operación del parqueadero, y que también crean y configuran celdas.
+- Administradores que configuran tarifas y empleados, y consultan ocupación, historial y bitácora.
 
 ## Product Purpose
 

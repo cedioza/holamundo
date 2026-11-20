@@ -163,7 +163,17 @@ def authenticate(
         raise HTTPException(403, "La cuenta autenticada no pertenece a este parqueadero.")
     if not user.active:
         raise HTTPException(403, "Tu cuenta está desactivada. Contacta al administrador.")
-    principal = build_principal(db, user)
+    # `attach_session_context` ya validó este mismo token y construyó el
+    # principal. Se reutiliza solo cuando coincide exactamente con la petición;
+    # en cualquier otro caso se recalcula. Las comprobaciones de token, cuenta,
+    # parqueadero y estado siguen ejecutándose aquí (sin relajar la seguridad).
+    principal = getattr(request.state, "principal", None)
+    cached_token = getattr(request.state, "auth_token", None)
+    if (principal is None or cached_token != token.strip()
+            or principal.user_id != user.id
+            or principal.username != user.username
+            or principal.parking_lot_id != user.parking_lot_id):
+        principal = build_principal(db, user)
     current_principal.set(principal)
     if principal.must_change_password and request.url.path not in {
         "/api/auth/change-password",
