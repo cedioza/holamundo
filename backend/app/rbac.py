@@ -81,6 +81,7 @@ ACTIVITY_LABELS: dict[str, str] = {
     "ZONE_CREATED": "Creación de zona",
     "CELL_CREATED": "Creación de celda",
     "CELL_UPDATED": "Edición de celda",
+    "CELL_DELETED": "Eliminación de celda",
     "CELL_STATUS_CHANGED": "Cambio de estado de celda",
     "EMPLOYEE_CREATED": "Creación de empleado",
     "EMPLOYEE_UPDATED": "Edición de empleado",

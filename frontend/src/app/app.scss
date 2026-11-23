@@ -1110,6 +1110,14 @@ textarea {
 .button-secondary:not(:disabled):hover {
   background: var(--surface);
 }
+.button-danger {
+  border-color: var(--danger);
+  background: var(--white);
+  color: var(--danger);
+}
+.button-danger:not(:disabled):hover {
+  background: var(--danger-soft);
+}
 .button-sm {
   height: 32px;
   padding: 0 12px;

@@ -166,6 +166,9 @@ export class ApiService {
     return this.http.patch<Cell>(`${this.base}/cells/${id}/status`, { operational_status, reason },
       { params: this.scopedParams() });
   }
+  deleteCell(id: number): Observable<{ detail: string }> {
+    return this.http.delete<{ detail: string }>(`${this.base}/cells/${id}`, { params: this.scopedParams() });
+  }
   cellStatusEvents(id: number, limit = 5): Observable<CellStatusEvent[]> {
     return this.http.get<CellStatusEvent[]>(`${this.base}/cells/${id}/status-events`, { params: this.scopedParams({ limit }) });
   }

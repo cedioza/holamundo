@@ -475,6 +475,11 @@ export class App implements OnInit {
   cellEditAttempted = false;
   cellEditNotice = '';
   cellEditServerCodeError = '';
+  /* Eliminación de celdas (solo administrador) */
+  cellDeleteId = 0;
+  cellDeleteConfirmOpen = false;
+  cellDeleteNotice = '';
+  cellDeleteError = '';
   cellMaintId = 0;
   cellMaintReason = '';
   cellMaintAttempted = false;
@@ -1427,6 +1432,11 @@ export class App implements OnInit {
   /** Celda que edita el formulario de edición. */
   get cellEditCell(): Cell | undefined {
     return this.cells.find((celda) => celda.id === this.cellEditId);
+  }
+
+  /** Celda seleccionada para eliminar (solo administrador). */
+  get cellDeleteCell(): Cell | undefined {
+    return this.cells.find((celda) => celda.id === this.cellDeleteId);
   }
 
   /** Celda del panel «pasar a mantenimiento». */
@@ -3062,6 +3072,52 @@ export class App implements OnInit {
         },
         error: (err: unknown) => this.handleCellWriteError(err, 'edit'),
       });
+  }
+
+  /** Abre la confirmación de eliminación de la celda seleccionada. */
+  openCellDelete(): void {
+    if (!this.can('MANAGE_CELLS')) {
+      this.error = 'La eliminación de celdas está reservada al administrador.';
+      return;
+    }
+    const celda = this.cellEditCell;
+    if (!celda) return;
+    this.cellDeleteId = celda.id;
+    this.cellDeleteNotice = '';
+    this.cellDeleteError = '';
+    this.cellDeleteConfirmOpen = true;
+  }
+
+  /** Cierra la confirmación de eliminación sin aplicar cambios. */
+  cancelCellDelete(): void {
+    this.cellDeleteConfirmOpen = false;
+    this.cellDeleteId = 0;
+    this.cellDeleteError = '';
+  }
+
+  /** Elimina la celda; si falla, muestra el motivo devuelto por la API. */
+  confirmCellDelete(): void {
+    const celda = this.cellDeleteCell;
+    if (!celda) return;
+    this.busy = true;
+    this.cellDeleteError = '';
+    this.api.deleteCell(celda.id).subscribe({
+      next: (result) => {
+        this.busy = false;
+        this.cellDeleteConfirmOpen = false;
+        this.cellDeleteNotice = result.detail || `Celda ${celda.code} eliminada.`;
+        this.cellDeleteId = 0;
+        this.loadCellEdit(undefined);
+        this.refreshLists();
+        this.reloadDashboard();
+        this.done(`Celda ${celda.code} eliminada.`);
+      },
+      error: (err: unknown) => {
+        this.busy = false;
+        this.cellDeleteError = this.errorDetail(err);
+        this.changeDetector.detectChanges();
+      },
+    });
   }
 
   /** Confirma el paso a mantenimiento con su motivo obligatorio. */

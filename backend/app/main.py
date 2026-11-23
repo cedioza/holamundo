@@ -907,6 +907,58 @@ def update_cell(cell_id: int, payload: CellUpdate, db: Session = Depends(get_db)
     return cell_payload(db, cell)
 
 
+@app.delete("/api/cells/{cell_id}", dependencies=[Depends(permit("MANAGE_CELLS"))])
+def delete_cell(cell_id: int, db: Session = Depends(get_db)) -> dict[str, Any]:
+    """Elimina una celda solo si no hay restricciones de integridad.
+
+    Reservado a administradores (permiso MANAGE_CELLS). Se bloquea cuando la
+    celda tiene un movimiento activo, historial de movimientos o bitácora de
+    cambios de estado: borrarla rompería la trazabilidad de la operación.
+    """
+    cell = db.get(Cell, cell_id)
+    if not cell:
+        raise HTTPException(404, "Celda no encontrada")
+
+    active = db.scalar(
+        select(Movement)
+        .where(Movement.cell_id == cell_id, Movement.exited_at.is_(None))
+        .options(joinedload(Movement.vehicle))
+    )
+    if active:
+        plate = active.vehicle.plate if active.vehicle else "sin placa"
+        raise HTTPException(
+            409,
+            f"No se puede eliminar {cell.code}: tiene un movimiento activo de la placa {plate}. "
+            "Registra la salida del vehículo antes de eliminarla.",
+        )
+
+    total_movements = db.scalar(select(func.count(Movement.id)).where(Movement.cell_id == cell_id)) or 0
+    if total_movements:
+        raise HTTPException(
+            409,
+            f"No se puede eliminar {cell.code}: conserva {total_movements} movimiento(s) en el "
+            "historial. La trazabilidad de entradas y salidas no se puede borrar.",
+        )
+
+    total_events = db.scalar(select(func.count(CellStatusEvent.id)).where(CellStatusEvent.cell_id == cell_id)) or 0
+    if total_events:
+        raise HTTPException(
+            409,
+            f"No se puede eliminar {cell.code}: tiene {total_events} cambio(s) registrado(s) de "
+            "estado. La bitácora de la celda no se puede borrar.",
+        )
+
+    code = cell.code
+    db.delete(cell)
+    audit_admin(db, "CELL_DELETED", code)
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(409, "No se puede eliminar la celda: existen registros relacionados.")
+    return {"detail": f"Celda {code} eliminada."}
+
+
 @app.patch("/api/cells/{cell_id}/status", dependencies=[Depends(permit("MANAGE_CELLS"))])
 def update_cell_status(
     cell_id: int,
