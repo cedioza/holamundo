@@ -3074,14 +3074,14 @@ export class App implements OnInit {
       });
   }
 
-  /** Abre la confirmación de eliminación de la celda seleccionada. */
-  openCellDelete(): void {
+  /** Abre la confirmación de eliminación de la celda indicada (o la de edición). */
+  openCellDelete(cell?: Cell): void {
     if (!this.can('MANAGE_CELLS')) {
       this.error = 'La eliminación de celdas está reservada al administrador.';
       return;
     }
-    const celda = this.cellEditCell;
-    if (!celda) return;
+    const celda = cell ?? this.cellEditCell;
+    if (!celda || this.cellStatus(celda) !== 'free') return;
     this.cellDeleteId = celda.id;
     this.cellDeleteNotice = '';
     this.cellDeleteError = '';
