@@ -760,7 +760,21 @@ def create_site(payload: SiteCreate, db: Session = Depends(get_db)) -> dict[str,
     resolve_parking_lot(db, payload.parking_lot_id)
     if not db.get(ParkingLot, payload.parking_lot_id):
         raise HTTPException(404, "Parqueadero no encontrado")
-    site = Site(**payload.model_dump())
+    name = payload.name.strip()
+    if not name:
+        raise HTTPException(422, "El nombre de la sede es obligatorio")
+    duplicate = db.scalar(
+        select(Site.id).where(
+            Site.parking_lot_id == payload.parking_lot_id,
+            func.lower(func.trim(Site.name)) == name.lower(),
+        )
+    )
+    if duplicate:
+        raise HTTPException(
+            409,
+            f"Ya existe una sede llamada '{name}' en este parqueadero. No se guardó el duplicado; elige otro nombre.",
+        )
+    site = Site(parking_lot_id=payload.parking_lot_id, name=name, address=payload.address.strip())
     db.add(site)
     db.flush()
     audit_admin(db, "SITE_CREATED", site.name)
@@ -785,7 +799,21 @@ def create_zone(payload: ZoneCreate, parking_lot_id: int | None = None, db: Sess
     site = db.get(Site, payload.site_id)
     if not site or site.parking_lot_id != lot_id:
         raise HTTPException(404, "Sede no encontrada en este parqueadero")
-    zone = Zone(site_id=payload.site_id, name=payload.name.strip(), code=(payload.code or "").strip().upper())
+    name = payload.name.strip()
+    if not name:
+        raise HTTPException(422, "El nombre de la zona es obligatorio")
+    duplicate = db.scalar(
+        select(Zone.id).where(
+            Zone.site_id == payload.site_id,
+            func.lower(func.trim(Zone.name)) == name.lower(),
+        )
+    )
+    if duplicate:
+        raise HTTPException(
+            409,
+            f"Ya existe una zona llamada '{name}' en esta sede. No se guardó el duplicado; elige otro nombre.",
+        )
+    zone = Zone(site_id=payload.site_id, name=name, code=(payload.code or "").strip().upper())
     db.add(zone)
     db.flush()
     audit_admin(db, "ZONE_CREATED", zone.name)

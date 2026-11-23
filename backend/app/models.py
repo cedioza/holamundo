@@ -28,6 +28,7 @@ class ParkingLot(Base):
 
 class Site(Base):
     __tablename__ = "sites"
+    __table_args__ = (UniqueConstraint("parking_lot_id", "name", name="uq_site_name_per_parking"),)
     id: Mapped[int] = mapped_column(primary_key=True)
     parking_lot_id: Mapped[int] = mapped_column(ForeignKey("parking_lots.id"))
     name: Mapped[str] = mapped_column(String(120))
@@ -39,6 +40,7 @@ class Site(Base):
 
 class Zone(Base):
     __tablename__ = "zones"
+    __table_args__ = (UniqueConstraint("site_id", "name", name="uq_zone_name_per_site"),)
     id: Mapped[int] = mapped_column(primary_key=True)
     site_id: Mapped[int] = mapped_column(ForeignKey("sites.id"))
     name: Mapped[str] = mapped_column(String(80))
