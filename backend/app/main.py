@@ -1,10 +1,12 @@
 from calendar import monthrange
 from contextlib import asynccontextmanager
+from dataclasses import replace
 from datetime import date, datetime, timedelta, time
 from decimal import Decimal
 import os
 import re
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -35,6 +37,30 @@ from .rbac import (
 )
 from .security import hash_password, verify_password
 from .views import ensure_reporting_views
+
+#: Zona horaria de negocio. Las columnas `DateTime` son naive, así que se guarda
+#: la hora local de Bogotá sin offset y se serializa con `-05:00` para que el
+#: navegador no la reinterprete como UTC.
+BOGOTA_TZ = ZoneInfo("America/Bogota")
+
+
+def local_today() -> date:
+    """Fecha civil de Bogotá, incluso si el servidor corre en UTC."""
+    return datetime.now(BOGOTA_TZ).date()
+
+
+def local_now_naive() -> datetime:
+    """Hora de Bogotá lista para columnas `DateTime` sin zona."""
+    return datetime.now(BOGOTA_TZ).replace(tzinfo=None)
+
+
+def iso_local(value: datetime | None) -> str | None:
+    """Serializa una hora naive guardada como Bogotá con su offset real."""
+    if value is None:
+        return None
+    aware = value.replace(tzinfo=BOGOTA_TZ) if value.tzinfo is None else value.astimezone(BOGOTA_TZ)
+    return aware.isoformat()
+
 
 #: Cabecera heredada. Se acepta pero NUNCA se usa para autorizar: la identidad
 #: sale del token firmado (ver `app.auth.authenticate`).
@@ -138,7 +164,7 @@ def tariff_state(tariff: MonthlyTariff, today: date) -> str:
 
 
 def tariff_payload(db: Session, tariff: MonthlyTariff, vehicle_type: VehicleType | None = None) -> dict[str, Any]:
-    today = date.today()
+    today = local_today()
     vtype = vehicle_type or db.get(VehicleType, tariff.vehicle_type_id)
     return {
         "id": tariff.id,
@@ -234,7 +260,7 @@ def seed_database(db: Session) -> None:
         cell = Cell(zone_id=moto_zone.id, code=f"M-{number:02d}")
         cell.compatible_types.append(moto_type)
         db.add(cell)
-    today = date.today()
+    today = local_today()
     db.add_all([
         MonthlyTariff(parking_lot_id=lot.id, vehicle_type_id=car_type.id, amount=Decimal("250000"), effective_from=today),
         MonthlyTariff(parking_lot_id=lot.id, vehicle_type_id=truck_type.id, amount=Decimal("250000"), effective_from=today),
@@ -389,7 +415,7 @@ def dashboard(parking_lot_id: int | None = None, db: Session = Depends(get_db)) 
                 item["occupied"] += 1
             else:
                 item["available"] += 1
-    today = date.today()
+    today = local_today()
     active_contracts = db.scalars(
         select(MonthlyContract).join(Vehicle).where(
             Vehicle.parking_lot_id == lot_id,
@@ -400,9 +426,15 @@ def dashboard(parking_lot_id: int | None = None, db: Session = Depends(get_db)) 
     ).all()
     valid_contract_vehicle_ids = {contract.vehicle_id for contract in active_contracts}
     expired_count = max(vehicles_count - len(valid_contract_vehicle_ids), 0)
+    coverage_end_by_vehicle = dict(db.execute(
+        select(MonthlyContract.vehicle_id, func.max(MonthlyContract.expires_on))
+        .join(Vehicle)
+        .where(Vehicle.parking_lot_id == lot_id, MonthlyContract.status == "ACTIVE")
+        .group_by(MonthlyContract.vehicle_id)
+    ).all())
     expiring_soon = len({
-        contract.vehicle_id for contract in active_contracts
-        if (contract.expires_on - today).days <= 7
+        vehicle_id for vehicle_id, coverage_end in coverage_end_by_vehicle.items()
+        if vehicle_id in valid_contract_vehicle_ids and (coverage_end - today).days <= 7
     })
     # Inventario completo por grupo de compatibilidad. Una celda apta para varios
     # grupos se cuenta una sola vez: las exclusivas de motos van a "motos" y el
@@ -500,7 +532,7 @@ def update_customer(customer_id: int, payload: CustomerCreate, db: Session = Dep
 
 
 def current_contract(db: Session, vehicle_id: int) -> MonthlyContract | None:
-    today = date.today()
+    today = local_today()
     return db.scalar(select(MonthlyContract).where(
         MonthlyContract.vehicle_id == vehicle_id,
         MonthlyContract.status == "ACTIVE",
@@ -523,7 +555,7 @@ def contract_maps(db: Session, vehicle_ids: list[int]) -> tuple[dict[int, Monthl
     """Contratos vigentes y de referencia por vehículo en una sola consulta."""
     if not vehicle_ids:
         return {}, {}
-    today = date.today()
+    today = local_today()
     contracts = db.scalars(
         select(MonthlyContract)
         .where(MonthlyContract.vehicle_id.in_(vehicle_ids), MonthlyContract.status == "ACTIVE")
@@ -558,11 +590,12 @@ def vehicle_payload(
     fallback_contract: MonthlyContract | None = None,
     active_movement: Movement | None | object = _UNSET,
 ) -> dict[str, Any]:
-    today = date.today()
+    today = local_today()
     if contract is _UNSET:
         contract = current_contract(db, vehicle.id)
         fallback_contract = latest_contract(db, vehicle.id)
     displayed_contract = contract or fallback_contract
+    expiry_contract = fallback_contract or contract
     upcoming = displayed_contract is not None and displayed_contract.starts_on > today
     monthly_status = "VIGENTE" if contract else "ANTICIPADA" if upcoming else "VENCIDA"
     if active_movement is _UNSET:
@@ -576,7 +609,7 @@ def vehicle_payload(
         "type_code": vehicle.vehicle_type.code, "type_name": vehicle.vehicle_type.name,
         "plate": vehicle.plate, "brand": vehicle.brand, "color": vehicle.color,
         "monthly_status": monthly_status,
-        "expires_on": displayed_contract.expires_on.isoformat() if displayed_contract else None,
+        "expires_on": expiry_contract.expires_on.isoformat() if expiry_contract else None,
         "inside": active_movement is not None, "movement_id": active_movement.id if active_movement else None,
         "cell_code": active_movement.cell.code if active_movement else None,
     }
@@ -631,7 +664,7 @@ def list_contracts(parking_lot_id: int | None = None, db: Session = Depends(get_
     cobertura une todos los periodos pagados del vehículo.
     """
     lot_id = resolve_parking_lot(db, parking_lot_id)
-    today = date.today()
+    today = local_today()
     vehicles = db.scalars(
         select(Vehicle)
         .where(Vehicle.parking_lot_id == lot_id, Vehicle.active.is_(True))
@@ -675,8 +708,8 @@ def list_contracts(parking_lot_id: int | None = None, db: Session = Depends(get_
     rows: list[dict[str, Any]] = []
     for vehicle in vehicles:
         contracts = contracts_by_vehicle[vehicle.id]
-        current = next((item for item in contracts if item.starts_on <= today <= item.expires_on), None)
-        latest = contracts[0] if contracts else None
+        current = next((item for item in contracts if item.starts_on <= today < item.expires_on), None)
+        latest = max(contracts, key=lambda item: (item.expires_on, item.starts_on), default=None)
         reference = current or latest
         coverage_start = min((item.starts_on for item in contracts), default=None)
         coverage_end = max((item.expires_on for item in contracts), default=None)
@@ -689,6 +722,9 @@ def list_contracts(parking_lot_id: int | None = None, db: Session = Depends(get_
         payments = payments_by_vehicle[vehicle.id]
         last_payment = payments[0] if payments else None
         tariff = tariffs.get(vehicle.vehicle_type_id)
+        period_start = last_payment.period_start if last_payment else reference.starts_on if reference else None
+        period_end = last_payment.period_end if last_payment else reference.expires_on if reference else None
+        expiring_soon = bool(current and coverage_end and (coverage_end - today).days <= 30)
         rows.append({
             "vehicle_id": vehicle.id,
             "plate": vehicle.plate,
@@ -700,14 +736,14 @@ def list_contracts(parking_lot_id: int | None = None, db: Session = Depends(get_
             "contract_code": f"CT-{reference.id:04d}" if reference else None,
             "contract_state": "Activo" if current else "Pendiente" if monthly_status == "ANTICIPADA" else "Vencido",
             "monthly_status": monthly_status,
-            "expiring_soon": bool(current and (current.expires_on - today).days <= 30),
+            "expiring_soon": expiring_soon,
             "coverage_start": coverage_start.isoformat() if coverage_start else None,
             "coverage_end": coverage_end.isoformat() if coverage_end else None,
-            "period_start": reference.starts_on.isoformat() if reference else None,
-            "period_end": reference.expires_on.isoformat() if reference else None,
+            "period_start": period_start.isoformat() if period_start else None,
+            "period_end": period_end.isoformat() if period_end else None,
             "tariff": money_float(tariff.amount) if tariff else 0,
             "paid_amount": money_float(last_payment.amount) if last_payment else 0,
-            "last_paid_at": last_payment.paid_at.isoformat() if last_payment else None,
+            "last_paid_at": iso_local(last_payment.paid_at) if last_payment else None,
             "payments_count": len(payments),
         })
     return rows
@@ -946,7 +982,7 @@ def list_tariffs(parking_lot_id: int | None = None, db: Session = Depends(get_db
 @app.put("/api/tariffs/{vehicle_type_id}", dependencies=[Depends(permit("MANAGE_STRUCTURE"))])
 def update_tariff(vehicle_type_id: int, amount: Decimal = Query(gt=0), parking_lot_id: int | None = None, db: Session = Depends(get_db)) -> dict[str, Any]:
     lot_id = resolve_parking_lot(db, parking_lot_id)
-    today = date.today()
+    today = local_today()
     tariff = db.scalar(select(MonthlyTariff).where(MonthlyTariff.parking_lot_id == lot_id, MonthlyTariff.vehicle_type_id == vehicle_type_id,
                                                         MonthlyTariff.effective_until.is_(None)).order_by(MonthlyTariff.effective_from.desc()).limit(1))
     if not tariff:
@@ -1035,7 +1071,7 @@ def build_report(
     if not lot_id:
         raise HTTPException(404, "Parqueadero no encontrado")
     lot = db.get(ParkingLot, lot_id)
-    day = report_date or date.today()
+    day = report_date or local_today()
     day_start = datetime.combine(day, datetime.min.time())
     day_end = datetime.combine(day, datetime.max.time())
 
@@ -1128,19 +1164,20 @@ def build_report(
     if vehicle_type_id:
         vehicles = [item for item in vehicles if item.vehicle_type_id == vehicle_type_id]
     customers_count = db.scalar(select(func.count(Customer.id)).where(Customer.parking_lot_id == lot_id, Customer.active.is_(True))) or 0
-    today = date.today()
+    today = local_today()
     active_contracts: dict[int, MonthlyContract] = {}
+    coverage_end_by_vehicle: dict[int, date] = {}
     vehicle_ids = [vehicle.id for vehicle in vehicles]
     if vehicle_ids:
         for contract in db.scalars(
             select(MonthlyContract).where(
                 MonthlyContract.vehicle_id.in_(vehicle_ids),
                 MonthlyContract.status == "ACTIVE",
-                MonthlyContract.starts_on <= today,
-                MonthlyContract.expires_on > today,
             ).order_by(MonthlyContract.expires_on)
         ).unique().all():
-            active_contracts[contract.vehicle_id] = contract
+            coverage_end_by_vehicle[contract.vehicle_id] = contract.expires_on
+            if contract.starts_on <= today < contract.expires_on:
+                active_contracts[contract.vehicle_id] = contract
     expiring_soon = 0
     expired = 0
     active_monthly = 0
@@ -1148,7 +1185,8 @@ def build_report(
         contract = active_contracts.get(vehicle.id)
         if contract:
             active_monthly += 1
-            if (contract.expires_on - today).days <= 30:
+            coverage_end = coverage_end_by_vehicle.get(vehicle.id, contract.expires_on)
+            if (coverage_end - today).days <= 30:
                 expiring_soon += 1
         else:
             expired += 1
@@ -1162,8 +1200,8 @@ def build_report(
         "id": item.id,
         "plate": item.vehicle.plate,
         "type_name": item.vehicle.vehicle_type.name,
-        "entered_at": item.entered_at.isoformat(),
-        "exited_at": item.exited_at.isoformat() if item.exited_at else None,
+        "entered_at": iso_local(item.entered_at),
+        "exited_at": iso_local(item.exited_at),
         "cell_code": item.cell.code,
         "zone_name": zones_by_id[item.cell.zone_id].name if item.cell.zone_id in zones_by_id else "",
         "entry_employee_id": item.entry_employee_id,
@@ -1178,7 +1216,7 @@ def build_report(
     return {
         "parking_lot": {"id": lot.id, "name": lot.name},
         "report_date": day.isoformat(),
-        "cutoff": datetime.now().isoformat(),
+        "cutoff": iso_local(local_now_naive()),
         "indicators": {
             "customers": customers_count,
             "vehicles": len(vehicles),
@@ -1341,7 +1379,7 @@ def list_activity(parking_lot_id: int | None = None, limit: int = Query(default=
     ).all()
     activity = [{
         "id": f"movement-{movement.id}",
-        "occurred_at": movement.entered_at.isoformat(),
+        "occurred_at": iso_local(movement.entered_at),
         "employee": employee.full_name if employee else None,
         "operation": f"Ingreso {vehicle.plate} · {cell.code}",
         "kind": "ENTRY",
@@ -1356,7 +1394,7 @@ def list_activity(parking_lot_id: int | None = None, limit: int = Query(default=
     ).all()
     activity.extend({
         "id": f"exit-{movement.id}",
-        "occurred_at": movement.exited_at.isoformat() if movement.exited_at else movement.entered_at.isoformat(),
+        "occurred_at": iso_local(movement.exited_at or movement.entered_at),
         "employee": employee.full_name if employee else None,
         "operation": f"Salida {vehicle.plate} · {cell.code}",
         "kind": "EXIT",
@@ -1400,7 +1438,7 @@ def register_entry(payload: EntryCreate, db: Session = Depends(get_db)) -> dict[
     active_movement = db.scalar(select(Movement.id).where(Movement.vehicle_id == vehicle.id, Movement.exited_at.is_(None)))
     if active_movement:
         raise HTTPException(409, "El vehículo ya tiene un ingreso activo")
-    today = date.today()
+    today = local_today()
     contract = current_contract(db, vehicle.id)
     if not contract or contract.starts_on > today or contract.expires_on <= today:
         raise HTTPException(409, "La mensualidad está vencida o aún no inicia")
@@ -1412,6 +1450,7 @@ def register_entry(payload: EntryCreate, db: Session = Depends(get_db)) -> dict[
         cell_id=cell.id,
         notes=payload.notes,
         entry_employee_id=actor.employee_id,
+        entered_at=local_now_naive(),
     )
     db.add(movement)
     record_activity(
@@ -1430,7 +1469,7 @@ def register_entry(payload: EntryCreate, db: Session = Depends(get_db)) -> dict[
         raise HTTPException(409, "La celda o el vehículo acaba de ser asignado por otro empleado")
     db.refresh(movement)
     return {"id": movement.id, "vehicle_id": vehicle.id, "plate": vehicle.plate, "cell_id": cell.id,
-            "cell_code": cell.code, "entered_at": movement.entered_at.isoformat(), "exited_at": None,
+            "cell_code": cell.code, "entered_at": iso_local(movement.entered_at), "exited_at": None,
             "entry_employee_id": actor.employee_id, "entry_employee": actor.display_name}
 
 
@@ -1445,7 +1484,7 @@ def register_exit(movement_id: int, parking_lot_id: int | None = None, db: Sessi
     ).options(joinedload(Movement.vehicle), joinedload(Movement.cell)))
     if not movement:
         raise HTTPException(404, "No se encontró un ingreso activo con ese identificador")
-    exited_at = datetime.now()
+    exited_at = local_now_naive()
     movement.exited_at = exited_at
     movement.exit_employee_id = actor.employee_id
     record_activity(
@@ -1459,7 +1498,7 @@ def register_exit(movement_id: int, parking_lot_id: int | None = None, db: Sessi
     )
     db.commit()
     return {"id": movement.id, "plate": movement.vehicle.plate, "cell_code": movement.cell.code,
-            "exited_at": exited_at.isoformat(),
+            "exited_at": iso_local(exited_at),
             "exit_employee_id": actor.employee_id, "exit_employee": actor.display_name}
 
 
@@ -1474,7 +1513,7 @@ def list_movements(active: bool = False, parking_lot_id: int | None = None, db: 
     return [{"id": item.id, "vehicle_id": item.vehicle_id, "plate": item.vehicle.plate,
              "brand": item.vehicle.brand, "color": item.vehicle.color, "type_name": item.vehicle.vehicle_type.name,
              "customer_name": item.vehicle.customer.full_name, "cell_id": item.cell_id, "cell_code": item.cell.code,
-             "entered_at": item.entered_at.isoformat(), "exited_at": item.exited_at.isoformat() if item.exited_at else None,
+             "entered_at": iso_local(item.entered_at), "exited_at": iso_local(item.exited_at),
              "entry_employee_id": item.entry_employee_id,
              "exit_employee_id": item.exit_employee_id,
              "entry_employee": employee_names.get(item.entry_employee_id),
@@ -1488,7 +1527,7 @@ def register_payment(payload: PaymentCreate, db: Session = Depends(get_db)) -> d
     vehicle = db.scalar(select(Vehicle).where(Vehicle.id == payload.vehicle_id).options(joinedload(Vehicle.vehicle_type)))
     if not vehicle:
         raise HTTPException(404, "Vehículo no encontrado")
-    today = (payload.paid_at.date() if payload.paid_at else date.today())
+    today = (payload.paid_at.date() if payload.paid_at else local_today())
     tariff = db.scalar(select(MonthlyTariff).where(MonthlyTariff.parking_lot_id == vehicle.parking_lot_id,
                                                   MonthlyTariff.vehicle_type_id == vehicle.vehicle_type_id,
                                                   MonthlyTariff.effective_from <= today,
@@ -1504,7 +1543,7 @@ def register_payment(payload: PaymentCreate, db: Session = Depends(get_db)) -> d
     db.add(contract)
     db.flush()
     payment = Payment(contract_id=contract.id, amount=tariff.amount * payload.months,
-                      paid_at=payload.paid_at or datetime.now(), period_start=period_start,
+                      paid_at=payload.paid_at or local_now_naive(), period_start=period_start,
                       period_end=period_end, method=payload.method, notes=payload.notes,
                       employee_id=actor.employee_id)
     db.add(payment)
@@ -1512,8 +1551,9 @@ def register_payment(payload: PaymentCreate, db: Session = Depends(get_db)) -> d
     db.commit()
     db.refresh(payment)
     return {"id": payment.id, "vehicle_id": vehicle.id, "plate": vehicle.plate, "amount": money_float(payment.amount),
-            "paid_at": payment.paid_at.isoformat(), "period_start": period_start.isoformat(), "period_end": period_end.isoformat(),
-            "method": payment.method, "employee_id": actor.employee_id, "employee": actor.display_name}
+            "paid_at": iso_local(payment.paid_at), "period_start": period_start.isoformat(), "period_end": period_end.isoformat(),
+            "method": payment.method, "reference": payment.notes or None,
+            "employee_id": actor.employee_id, "employee": actor.display_name}
 
 
 @app.get("/api/payments", dependencies=[Depends(permit("OPERATE"))])
@@ -1522,9 +1562,10 @@ def list_payments(parking_lot_id: int | None = None, db: Session = Depends(get_d
     payments = db.scalars(select(Payment).join(MonthlyContract).join(Vehicle).where(Vehicle.parking_lot_id == lot_id)
                           .options(joinedload(Payment.contract).joinedload(MonthlyContract.vehicle)).order_by(Payment.paid_at.desc()).limit(100)).unique().all()
     employee_names = {employee.id: employee.full_name for employee in db.scalars(select(Employee)).all()}
-    return [{"id": item.id, "plate": item.contract.vehicle.plate, "amount": money_float(item.amount),
-             "paid_at": item.paid_at.isoformat(), "period_start": item.period_start.isoformat(),
-             "period_end": item.period_end.isoformat(), "method": item.method,
+    return [{"id": item.id, "vehicle_id": item.contract.vehicle_id, "plate": item.contract.vehicle.plate,
+             "amount": money_float(item.amount), "paid_at": iso_local(item.paid_at),
+             "period_start": item.period_start.isoformat(), "period_end": item.period_end.isoformat(),
+             "method": item.method, "reference": item.notes or None,
              "employee_id": item.employee_id, "employee": employee_names.get(item.employee_id)} for item in payments]
 
 
@@ -1576,16 +1617,25 @@ MIN_PASSWORD_LENGTH = 12
 
 
 def resolve_parking_lot(db: Session, parking_lot_id: int | None) -> int:
-    """Aísla la operación por parqueadero de la cuenta autenticada.
+    """Resuelve el parqueadero de la operación y aplica el aislamiento por sesión.
 
-    La sesión determina el parqueadero: si se pide otro distinto, se rechaza
-    con 403. No se confía en el ``parking_lot_id`` enviado por el cliente.
+    La sesión determina el parqueadero por defecto. Un administrador con
+    ``MANAGE_STRUCTURE`` puede seleccionar otro parqueadero existente para
+    configurarlo; en ese caso el principal de la request se reemplaza por el
+    parqueadero elegido para que la bitácora y las validaciones posteriores
+    queden en el contexto correcto.
     """
     principal = current_principal.get()
     if principal is not None:
-        if parking_lot_id and int(parking_lot_id) != principal.parking_lot_id:
+        if not parking_lot_id or int(parking_lot_id) == principal.parking_lot_id:
+            return principal.parking_lot_id
+        target_lot_id = int(parking_lot_id)
+        if "MANAGE_STRUCTURE" not in principal.permissions:
             raise HTTPException(403, "La cuenta autenticada no pertenece a este parqueadero.")
-        return principal.parking_lot_id
+        if not db.get(ParkingLot, target_lot_id):
+            raise HTTPException(404, "Parqueadero no encontrado")
+        current_principal.set(replace(principal, parking_lot_id=target_lot_id))
+        return target_lot_id
     if parking_lot_id:
         if not db.get(ParkingLot, parking_lot_id):
             raise HTTPException(404, "Parqueadero no encontrado")
@@ -2022,7 +2072,7 @@ def update_user(
     if not changes and not password_changed:
         return fetch_user_payload(db, user.id, lot_id)
 
-    user.updated_at = datetime.now()
+    user.updated_at = local_now_naive()
     if changes:
         record_activity(
             db,
@@ -2082,7 +2132,7 @@ def set_user_status(
     target = bool(payload.active)
     if user.active != target:
         user.active = target
-        user.updated_at = datetime.now()
+        user.updated_at = local_now_naive()
         record_activity(
             db,
             lot_id=lot_id,

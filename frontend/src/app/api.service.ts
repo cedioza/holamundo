@@ -45,7 +45,7 @@ export interface Dashboard {
   payments_this_month: number;
   payments_today: number; payments_today_count: number;
 }
-export interface Payment { id: number; vehicle_id?: number; plate: string; amount: number; paid_at: string; period_start: string; period_end: string; method: string; received_by?: string | null; }
+export interface Payment { id: number; vehicle_id?: number; plate: string; amount: number; paid_at: string; period_start: string; period_end: string; method: string; reference?: string | null; received_by?: string | null; }
 export interface ContractRow {
   vehicle_id: number; plate: string; type_name: string; customer_name: string;
   customer_document: string; customer_document_type: string;
@@ -178,7 +178,13 @@ export class ApiService {
   exit(movementId: number): Observable<unknown> { return this.http.post(`${this.base}/movements/${movementId}/exit`, {}, { params: this.scopedParams() }); }
   payments(): Observable<Payment[]> { return this.http.get<Payment[]>(`${this.base}/payments`, { params: this.scopedParams() }); }
   contracts(): Observable<ContractRow[]> { return this.http.get<ContractRow[]>(`${this.base}/contracts`, { params: this.scopedParams() }); }
-  createPayment(vehicle_id: number, months: number, method: string): Observable<Payment> { return this.http.post<Payment>(`${this.base}/payments`, { vehicle_id, months, method }); }
+  createPayment(vehicle_id: number, months: number, method: string, paid_at?: string, reference?: string): Observable<Payment> {
+    return this.http.post<Payment>(`${this.base}/payments`, {
+      vehicle_id, months, method,
+      paid_at: paid_at || undefined,
+      notes: reference || undefined,
+    });
+  }
   tariffs(): Observable<Tariff[]> { return this.http.get<Tariff[]>(`${this.base}/tariffs`, { params: this.scopedParams() }); }
   tariffHistory(): Observable<TariffHistory[]> { return this.http.get<TariffHistory[]>(`${this.base}/tariffs/history`, { params: this.scopedParams() }); }
   createTariff(payload: { vehicle_type_id: number; amount: number; effective_from: string; effective_until: string | null; note: string }): Observable<TariffHistory> {

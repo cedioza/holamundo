@@ -37,6 +37,11 @@ import {
 
 registerLocaleData(localeEsCo);
 
+/** Valor inicial de `datetime-local` en hora de Bogotá (UTC-5, sin DST). */
+function bogotaDateTimeLocal(): string {
+  return new Date(Date.now() - 5 * 60 * 60 * 1000).toISOString().slice(0, 16);
+}
+
 /** Pestañas del módulo de empleados y turnos. */
 type EmployeeTab = 'team' | 'roles' | 'activity';
 
@@ -82,6 +87,12 @@ type VehicleBrandFilter = 'TODOS' | string;
 /** Pestañas de mensualidades: todas, vigentes, próximas a vencer y vencidas. */
 type MonthlyTab = 'all' | 'active' | 'expiring' | 'expired';
 
+/** Formas de registrar un pago desde el módulo de mensualidades. */
+type PaymentTab = 'monthly' | 'advance';
+
+/** Pestañas de la vista Historial. */
+type HistoryTab = 'movements' | 'payments' | 'novelties';
+
 /** Filtro por tipo de vehículo en la pantalla de mensualidades. */
 type MonthlyTypeFilter = 'TODOS' | string;
 
@@ -94,6 +105,16 @@ interface VehicleOwnerGroup {
   customerName: string;
   documentLabel: string;
   vehicles: Vehicle[];
+}
+
+/** Sugerencia del buscador del encabezado. */
+interface GlobalSearchResult {
+  kind: 'vehicle' | 'customer';
+  id: number;
+  title: string;
+  subtitle: string;
+  page: Page;
+  filter: string;
 }
 
 /** Pestañas del módulo de tarifas y vigencias. */
@@ -309,7 +330,11 @@ export class App implements OnInit {
   /** Temporizador que retira el aviso en pantalla; se reinicia en cada operación. */
   private noticeTimer: ReturnType<typeof setTimeout> | null = null;
   search = '';
+  globalSearchOpen = false;
+  private pendingVehicleSearch = '';
+  private pendingCustomerSearch = '';
   vehicleStatusFilter = 'TODAS';
+  historyTab: HistoryTab = 'movements';
   historyPage = 1;
   readonly historyPageSize = 10;
   /** Placa que se muestra filtrada en el historial (enlace «Ver movimiento»). */
@@ -435,7 +460,6 @@ export class App implements OnInit {
   monthlyPage = 1;
   readonly monthlyPageSize = 5;
   monthlySelectedVehicleId = 0;
-  paymentDialogOpen = false;
   paymentHistoryVehicleId = 0;
 
   /* Módulo de operación · ocupación y celdas */
@@ -487,6 +511,9 @@ export class App implements OnInit {
   paymentVehicleId = 0;
   paymentMonths = 1;
   paymentMethod = 'CASH';
+  paymentTab: PaymentTab = 'advance';
+  paymentPaidAt = bogotaDateTimeLocal();
+  paymentReference = '';
   noveltyForm = { vehicle_id: 0, category: 'Observación de vehículo', description: '' };
   entryPlate = '';
   entrySiteId = 0;
@@ -510,6 +537,14 @@ export class App implements OnInit {
   get selectedVehicle(): Vehicle | undefined {
     return this.vehicles.find((item) => item.id === Number(this.selectedVehicleId));
   }
+  /** Número de periodos que se enviarán: la mensualidad siempre es uno. */
+  get paymentPeriods(): number {
+    return this.paymentTab === 'monthly' ? 1 : Number(this.paymentMonths);
+  }
+  /** Total en COP del formulario activo de pagos. */
+  get paymentTotal(): number {
+    return this.monthlyPrice(Number(this.paymentVehicleId)) * this.paymentPeriods;
+  }
   get filteredVehicles(): Vehicle[] {
     const term = this.vehicleTerm;
     const byText = term
@@ -523,11 +558,27 @@ export class App implements OnInit {
   get activeMovements(): Movement[] {
     return this.movements.filter((item) => !item.exited_at);
   }
-  /** Movimientos que muestra el historial (filtrados por placa si la hay). */
+  /** Texto normalizado de la búsqueda de placa del historial. */
+  get historyPlateTerm(): string {
+    return this.historyPlate.trim().toUpperCase();
+  }
+  /** Movimientos que muestra el historial (búsqueda parcial por placa). */
   get historyMovements(): Movement[] {
-    if (!this.historyPlate) return this.movements;
-    const placa = this.historyPlate.toUpperCase();
-    return this.movements.filter((item) => item.plate.toUpperCase() === placa);
+    const placa = this.historyPlateTerm;
+    if (!placa) return this.movements;
+    return this.movements.filter((item) => item.plate.toUpperCase().includes(placa));
+  }
+  /** Pagos de todos los vehículos, filtrados solo si hay una placa buscada. */
+  get historyPayments(): Payment[] {
+    const placa = this.historyPlateTerm;
+    if (!placa) return this.payments;
+    return this.payments.filter((item) => item.plate.toUpperCase().includes(placa));
+  }
+  /** Novedades de todos los vehículos, filtradas solo si hay una placa buscada. */
+  get historyNovelties(): Novelty[] {
+    const placa = this.historyPlateTerm;
+    if (!placa) return this.novelties;
+    return this.novelties.filter((item) => item.plate.toUpperCase().includes(placa));
   }
   get pagedMovements(): Movement[] {
     const start = (this.historyPage - 1) * this.historyPageSize;
@@ -538,9 +589,9 @@ export class App implements OnInit {
   }
   /** Movimiento activo del aviso superior del historial. */
   get historyActiveMovement(): Movement | undefined {
-    if (!this.historyPlate) return this.activeMovements[0];
-    const placa = this.historyPlate.toUpperCase();
-    return this.activeMovements.find((item) => item.plate.toUpperCase() === placa);
+    const placa = this.historyPlateTerm;
+    if (!placa) return this.activeMovements[0];
+    return this.activeMovements.find((item) => item.plate.toUpperCase().includes(placa));
   }
   get historyPages(): number[] {
     const total = this.historyTotalPages;
@@ -560,6 +611,17 @@ export class App implements OnInit {
   }
   goToHistoryPage(page: number): void {
     this.historyPage = Math.min(Math.max(1, page), this.historyTotalPages);
+  }
+  selectHistoryTab(tab: HistoryTab): void {
+    this.historyTab = tab;
+  }
+  /** Reinicia la paginación cada vez que cambia la búsqueda por placa. */
+  onHistoryPlateChange(): void {
+    this.historyPage = 1;
+  }
+  clearHistoryPlate(): void {
+    this.historyPlate = '';
+    this.historyPage = 1;
   }
   get siteId(): number {
     return this.bootstrap?.sites[0]?.id ?? 0;
@@ -2025,6 +2087,106 @@ export class App implements OnInit {
     this.vehicleSearch = value;
   }
 
+  /** Coincidencias del buscador del encabezado: placa, cliente o documento. */
+  get globalSearchResults(): GlobalSearchResult[] {
+    const term = this.search.trim().toLowerCase();
+    if (!term) return [];
+
+    const vehicles: GlobalSearchResult[] = this.vehicles
+      .filter(
+        (vehiculo) =>
+          vehiculo.plate.toLowerCase().includes(term) ||
+          vehiculo.customer_name.toLowerCase().includes(term) ||
+          (vehiculo.customer_document_number ?? '').toLowerCase().includes(term) ||
+          (vehiculo.brand ?? '').toLowerCase().includes(term),
+      )
+      .slice(0, 6)
+      .map((vehiculo) => ({
+        kind: 'vehicle' as const,
+        id: vehiculo.id,
+        title: vehiculo.plate,
+        subtitle: `${vehiculo.customer_name} · ${vehiculo.customer_document_number ?? 'Sin documento'}`,
+        page: 'vehicles' as Page,
+        filter: vehiculo.plate,
+      }));
+
+    const customers: GlobalSearchResult[] = this.customers
+      .filter(
+        (cliente) =>
+          cliente.full_name.toLowerCase().includes(term) ||
+          cliente.document_number.toLowerCase().includes(term) ||
+          (cliente.phone ?? '').toLowerCase().includes(term) ||
+          this.customerVehicles(cliente.id).some((vehiculo) => vehiculo.plate.toLowerCase().includes(term)),
+      )
+      .slice(0, 6)
+      .map((cliente) => ({
+        kind: 'customer' as const,
+        id: cliente.id,
+        title: cliente.full_name,
+        subtitle: `${cliente.document_type ?? 'Documento'} ${cliente.document_number} · ${cliente.vehicles_count} vehículo(s)`,
+        page: 'customers' as Page,
+        filter: cliente.document_number,
+      }));
+
+    return [...vehicles, ...customers].slice(0, 8);
+  }
+
+  /** Mantiene abierto el panel de sugerencias mientras se escribe. */
+  onGlobalSearchChange(value: string): void {
+    this.search = value;
+    this.globalSearchOpen = true;
+    this.changeDetector.detectChanges();
+  }
+
+  /** Cierra el panel al perder el foco, salvo que el foco pase a una sugerencia. */
+  closeGlobalSearchOnBlur(event: FocusEvent): void {
+    const wrap = (event.currentTarget as HTMLElement).closest('.global-search-wrap');
+    if (wrap?.contains(event.relatedTarget as Node | null)) return;
+    this.globalSearchOpen = false;
+    this.changeDetector.detectChanges();
+  }
+
+  /** Enter abre el módulo de vehículos con la consulta ya aplicada. */
+  submitGlobalSearch(): void {
+    const term = this.search.trim();
+    if (!term) return;
+    this.globalSearchOpen = false;
+    if (this.page === 'vehicles') {
+      this.vehicleTab = 'search';
+      this.vehicleSearch = term;
+      this.changeDetector.detectChanges();
+      return;
+    }
+    this.pendingVehicleSearch = term;
+    this.vehicleTab = 'search';
+    this.navigate('vehicles');
+  }
+
+  /** Una sugerencia lleva al módulo correspondiente con su filtro aplicado. */
+  selectGlobalSearchResult(result: GlobalSearchResult): void {
+    this.globalSearchOpen = false;
+    this.search = result.filter;
+    if (result.page === 'customers') {
+      if (this.page === 'customers') {
+        this.customerSearch = result.filter;
+        this.changeDetector.detectChanges();
+        return;
+      }
+      this.pendingCustomerSearch = result.filter;
+      this.navigate('customers');
+      return;
+    }
+    if (this.page === 'vehicles') {
+      this.vehicleTab = 'search';
+      this.vehicleSearch = result.filter;
+      this.changeDetector.detectChanges();
+      return;
+    }
+    this.pendingVehicleSearch = result.filter;
+    this.vehicleTab = 'search';
+    this.navigate('vehicles');
+  }
+
   /** Filtra la búsqueda por tipo de vehículo. */
   setVehicleTypeFilter(value: VehicleTypeFilter): void {
     this.vehicleTypeFilter = value;
@@ -2357,13 +2519,23 @@ export class App implements OnInit {
       void this.router.navigate(['/dashboard']);
       return;
     }
+    if (page === 'vehicles' && this.pendingVehicleSearch) {
+      this.vehicleTab = 'search';
+      this.vehicleSearch = this.pendingVehicleSearch;
+      this.pendingVehicleSearch = '';
+    } else if (page === 'customers' && this.pendingCustomerSearch) {
+      this.customerSearch = this.pendingCustomerSearch;
+      this.pendingCustomerSearch = '';
+    }
     this.search = '';
+    this.globalSearchOpen = false;
     this.vehicleStatusFilter = 'TODAS';
     this.historyPage = 1;
     if (page === 'history') {
       // Enlace «Ver movimiento»: la placa llega pendiente desde la celda.
       this.historyPlate = this.historyPlatePending;
       this.historyPlatePending = '';
+      this.historyTab = 'movements';
     }
     this.error = '';
     this.clearNotice();
@@ -2443,9 +2615,56 @@ export class App implements OnInit {
     this.exitPlate = movement.plate;
   }
 
-  startPayment(vehicle: Vehicle): void {
+  /**
+   * Abre el registro de pagos con el vehículo ya elegido. La pestaña se decide
+   * solo: mensualidad si la cobertura vence en 7 días o menos (o no existe),
+   * anticipo de periodos en caso contrario.
+   */
+  openPaymentForVehicleId(vehicleId: number): void {
     this.navigate('payments-register');
-    this.paymentVehicleId = vehicle.id;
+    this.applyPaymentVehicle(Number(vehicleId));
+  }
+
+  startPayment(vehicle: Vehicle): void {
+    this.openPaymentForVehicleId(vehicle.id);
+  }
+
+  /** Reacciona al cambio de vehículo en el formulario de pagos. */
+  onPaymentVehicleChange(): void {
+    this.applyPaymentVehicle(Number(this.paymentVehicleId));
+  }
+
+  private applyPaymentVehicle(vehicleId: number): void {
+    this.paymentVehicleId = vehicleId;
+    this.selectedVehicleId = vehicleId;
+    this.paymentMonths = 1;
+    const vehicle = this.vehicles.find((item) => item.id === vehicleId);
+    this.paymentTab = this.paymentExpiringSoon(vehicle) ? 'monthly' : 'advance';
+  }
+
+  /** Días calendario hasta el vencimiento, calculados en horario de Bogotá. */
+  private daysUntilExpiry(expiresOn: string | null | undefined): number | null {
+    if (!expiresOn) return null;
+    const hoy = new Date(Date.now() - 5 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    return Math.round((Date.parse(expiresOn) - Date.parse(hoy)) / 86_400_000);
+  }
+
+  /** Considera "próxima a vencer" una cobertura que vence en ≤ 7 días. */
+  paymentExpiringSoon(vehicle: Vehicle | undefined): boolean {
+    const dias = this.daysUntilExpiry(vehicle?.expires_on);
+    return dias === null || dias <= 7;
+  }
+
+  /** Mensualidad vigente que además está a 7 días o menos de vencer. */
+  vehicleExpiringSoon(vehicle: Vehicle): boolean {
+    if (vehicle.monthly_status !== 'VIGENTE') return false;
+    const dias = this.daysUntilExpiry(vehicle.expires_on);
+    return dias !== null && dias >= 0 && dias <= 7;
+  }
+
+  selectPaymentTab(tab: PaymentTab): void {
+    this.paymentTab = tab;
+    if (tab === 'monthly') this.paymentMonths = 1;
   }
 
   /** Marca o desmarca un tipo compatible en el alta de celda. */
@@ -2726,15 +2945,16 @@ export class App implements OnInit {
     return `${dia}, ${value.getDate()} de ${mes} de ${value.getFullYear()}`;
   }
 
-  openPaymentDialog(): void {
-    this.paymentDialogOpen = true;
+  /** El acceso rápido "Registrar pago" abre la vista con las dos pestañas. */
+  openPaymentRegistration(): void {
+    this.navigate('payments-register');
     this.paymentVehicleId = 0;
+    this.selectedVehicleId = 0;
     this.paymentMonths = 1;
     this.paymentMethod = 'TRANSFER';
-  }
-
-  closePaymentDialog(): void {
-    this.paymentDialogOpen = false;
+    this.paymentTab = 'advance';
+    this.paymentPaidAt = bogotaDateTimeLocal();
+    this.paymentReference = '';
   }
 
   openPaymentHistory(vehicleId: number): void {
@@ -2767,15 +2987,24 @@ export class App implements OnInit {
     }
     this.busy = true;
     this.api
-      .createPayment(Number(this.paymentVehicleId), Number(this.paymentMonths), this.paymentMethod)
+      .createPayment(
+        Number(this.paymentVehicleId),
+        this.paymentPeriods,
+        this.paymentMethod,
+        this.paymentPaidAt || undefined,
+        this.paymentReference.trim() || undefined,
+      )
       .subscribe({
         next: (payment) => {
           this.done(
             `Pago de ${this.formatMoney(payment.amount)} registrado hasta ${this.formatDate(payment.period_end)}.`,
           );
           this.paymentVehicleId = 0;
+          this.selectedVehicleId = 0;
           this.paymentMonths = 1;
-          this.paymentDialogOpen = false;
+          this.paymentReference = '';
+          this.paymentPaidAt = bogotaDateTimeLocal();
+          this.paymentTab = 'advance';
           this.busy = false;
           this.refreshLists();
           this.reloadDashboard();
@@ -3715,13 +3944,6 @@ export class App implements OnInit {
   noveltyStatusLabel(status: string): string {
     const labels: Record<string, string> = { OPEN: 'Abierta', RESOLVED: 'Resuelta', IN_PROGRESS: 'En seguimiento' };
     return labels[status] ?? status;
-  }
-
-  /** Última novedad registrada sobre el vehículo que se está consultando. */
-  get vehicleLastNovelty(): Novelty | undefined {
-    const plate = this.movements[0]?.plate;
-    if (!plate) return undefined;
-    return this.novelties.find((item) => item.plate === plate);
   }
 
   registerNovelty(): void {

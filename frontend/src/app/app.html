@@ -116,15 +116,40 @@
         }
       </div>
 
-      <label class="global-search">
-        <img src="/icons/search.svg" alt="" width="16" height="16" />
-        <input
-          type="search"
-          placeholder="Buscar placa, cliente o documento"
-          aria-label="Búsqueda global"
-          [(ngModel)]="search"
-        />
-      </label>
+      <div class="global-search-wrap">
+        <label class="global-search">
+          <img src="/icons/search.svg" alt="" width="16" height="16" />
+          <input
+            type="search"
+            placeholder="Buscar placa, cliente o documento"
+            aria-label="Búsqueda global"
+            [ngModel]="search"
+            (ngModelChange)="onGlobalSearchChange($event)"
+            (keydown.enter)="submitGlobalSearch()"
+            (keydown.escape)="globalSearchOpen = false"
+            (blur)="closeGlobalSearchOnBlur($event)"
+          />
+        </label>
+        @if (globalSearchOpen && search.trim()) {
+          <div class="global-search-results" role="listbox" aria-label="Resultados de la búsqueda global">
+            @if (globalSearchResults.length) {
+              @for (result of globalSearchResults; track result.kind + result.id) {
+                <button
+                  type="button"
+                  class="global-search-result"
+                  role="option"
+                  (click)="selectGlobalSearchResult(result)"
+                >
+                  <span class="global-search-result-title">{{ result.title }}</span>
+                  <span class="global-search-result-subtitle">{{ result.subtitle }}</span>
+                </button>
+              }
+            } @else {
+              <p class="global-search-empty">Sin coincidencias por placa, cliente o documento.</p>
+            }
+          </div>
+        }
+      </div>
 
       <div class="turno">
         <span class="turno-title">Turno actual</span>
@@ -193,7 +218,7 @@
               </span>
             }
             @case ('payments') {
-              <button class="button button-primary" type="button" (click)="openPaymentDialog()">
+              <button class="button button-primary" type="button" (click)="openPaymentRegistration()">
                 <img src="/icons/plus.svg" alt="" width="16" height="16" />
                 <span>Registrar pago</span>
               </button>
@@ -380,7 +405,7 @@
               <div class="recent-row">
                 <span class="recent-time">
                   {{
-                    (movement.exited_at || movement.entered_at) | date: 'h:mm a' : '' : 'es-CO'
+                    (movement.exited_at || movement.entered_at) | date: 'h:mm a' : '-0500' : 'es-CO'
                   }}
                 </span>
                 <span>{{ movement.plate }} · {{ movement.type_name }}</span>
@@ -755,8 +780,8 @@
                   <p>
                     <span>Ingreso</span>
                     <strong>
-                      {{ movement.entered_at | date: 'd MMM y' : '' : 'es-CO' }} ·
-                      {{ movement.entered_at | date: 'h:mm a' : '' : 'es-CO' }}
+                      {{ movement.entered_at | date: 'd MMM y' : '-0500' : 'es-CO' }} ·
+                      {{ movement.entered_at | date: 'h:mm a' : '-0500' : 'es-CO' }}
                     </strong>
                   </p>
                   <p>
@@ -1052,7 +1077,14 @@
                   </div>
                   <div class="vehicle-cell">
                     @for (vehiculo of grupo.vehicles; track vehiculo.id) {
-                      <span class="vehicle-line">{{ vehicleMonthlyLabel(vehiculo) }}</span>
+                      <span class="vehicle-line vehicle-line--status">
+                        @if (vehicleExpiringSoon(vehiculo)) {
+                          <span class="status-pill status-good">VIGENTE</span>
+                          <span class="status-pill status-warn" title="Próxima a vencer">PRÓXIMA</span>
+                        } @else {
+                          {{ vehicleMonthlyLabel(vehiculo) }}
+                        }
+                      </span>
                       <span class="vehicle-line">
                         @if (vehiculo.expires_on) {
                           {{ vehiculo.expires_on | date: 'd MMM y' : '' : 'es-CO' }}
@@ -1546,7 +1578,7 @@
                     @for (movimiento of vehicleDetailMovements; track movimiento.id) {
                       <li>
                         <span>
-                          {{ movimiento.entered_at | date: 'd MMM y, HH:mm' : '' : 'es-CO' }} ·
+                          {{ movimiento.entered_at | date: 'd MMM y, HH:mm' : '-0500' : 'es-CO' }} ·
                           celda {{ movimiento.cell_code }}
                         </span>
                         @if (movimiento.exited_at) {
@@ -2297,7 +2329,7 @@
                     <p class="map-detail-row">
                       <span>Ingreso</span>
                       <strong>
-                        {{ movimiento.entered_at | date: 'd MMM · h:mm a' : '' : 'es-CO' }}
+                        {{ movimiento.entered_at | date: 'd MMM · h:mm a' : '-0500' : 'es-CO' }}
                       </strong>
                     </p>
                   }
@@ -3154,15 +3186,28 @@
 
         <div class="history-header">
           <div class="history-header-main">
-            <h1>Historial de {{ historyPlate || movements[0]?.plate || 'vehículo' }}</h1>
+            <h1>Historial de {{ historyPlate || 'vehículos' }}</h1>
             <p>
-              @if (historyPlate) {
-                Movimientos de {{ historyPlate }} · {{ historyMovements.length }}
-                registro(s) · {{ mapSiteName }}
-              } @else if (movements[0]) {
-                {{ movements[0].brand }} · {{ movements[0].color }} · Automóvil · {{ movements[0].customer_name }} · {{ mapSiteName }}
+              @if (historyTab === 'movements') {
+                @if (historyPlate) {
+                  Movimientos de {{ historyPlate }} · {{ historyMovements.length }}
+                  registro(s) · {{ mapSiteName }}
+                } @else {
+                  Movimientos de todos los vehículos · {{ historyMovements.length }}
+                  registro(s) · {{ mapSiteName }}
+                }
+              } @else if (historyTab === 'payments') {
+                @if (historyPlate) {
+                  Pagos de {{ historyPlate }} · {{ historyPayments.length }} registro(s) · {{ mapSiteName }}
+                } @else {
+                  Pagos de todos los vehículos · {{ historyPayments.length }} registro(s) · {{ mapSiteName }}
+                }
               } @else {
-                Consulta el historial completo de movimientos, pagos y novedades por vehículo.
+                @if (historyPlate) {
+                  Novedades de {{ historyPlate }} · {{ historyNovelties.length }} registro(s) · {{ mapSiteName }}
+                } @else {
+                  Novedades de todos los vehículos · {{ historyNovelties.length }} registro(s) · {{ mapSiteName }}
+                }
               }
             </p>
           </div>
@@ -3170,16 +3215,49 @@
         </div>
 
         <nav class="customer-tabs" aria-label="Pestañas de historial">
-          <button type="button" class="customer-tab customer-tab--active">Movimientos</button>
-          <button type="button" class="customer-tab">Pagos</button>
-          <button type="button" class="customer-tab">Novedades</button>
+          <button
+            type="button"
+            class="customer-tab"
+            [class.customer-tab--active]="historyTab === 'movements'"
+            (click)="selectHistoryTab('movements')"
+          >
+            Movimientos
+          </button>
+          <button
+            type="button"
+            class="customer-tab"
+            [class.customer-tab--active]="historyTab === 'payments'"
+            (click)="selectHistoryTab('payments')"
+          >
+            Pagos
+          </button>
+          <button
+            type="button"
+            class="customer-tab"
+            [class.customer-tab--active]="historyTab === 'novelties'"
+            (click)="selectHistoryTab('novelties')"
+          >
+            Novedades
+          </button>
         </nav>
 
+        @if (historyTab === 'movements') {
         <div class="history-filters">
-          <label class="history-search">
+          <div class="history-search">
             <img src="/icons/search.svg" alt="" width="16" height="16" />
-            <input type="search" placeholder="Buscar placa, cliente o documento" [value]="historyPlate || movements[0]?.plate || ''" readonly />
-          </label>
+            <input
+              type="search"
+              placeholder="Buscar placa"
+              aria-label="Buscar movimientos por placa"
+              autocomplete="off"
+              [(ngModel)]="historyPlate"
+              name="historyPlate"
+              (ngModelChange)="onHistoryPlateChange()"
+            />
+            @if (historyPlate) {
+              <button type="button" class="history-search-clear" aria-label="Limpiar búsqueda" (click)="clearHistoryPlate()">×</button>
+            }
+          </div>
           <label class="history-filter">
             <span>1–20 oct 2026</span>
             <img src="/icons/chevron-down.svg" alt="" width="13" height="13" />
@@ -3194,7 +3272,7 @@
           <div class="message message--info">
             <p class="message-title">ⓘ Movimiento activo · Salida pendiente</p>
             <p class="message-body">
-              {{ activo.plate }} ingresó el {{ activo.entered_at | date: 'd \'de\' MMMM \'a las\' HH:mm' : '' : 'es-CO' }} · Celda {{ activo.cell_code }} · {{ movementOwner(activo) }}. El cierre se realiza únicamente desde Registrar salida.
+              {{ activo.plate }} ingresó el {{ activo.entered_at | date: 'd \'de\' MMMM \'a las\' HH:mm' : '-0500' : 'es-CO' }} · Celda {{ activo.cell_code }} · {{ movementOwner(activo) }}. El cierre se realiza únicamente desde Registrar salida.
             </p>
           </div>
         }
@@ -3217,13 +3295,13 @@
                   <tr>
                     <td><strong>MOV-{{ movement.id.toString().padStart(4, '0') }}</strong></td>
                     <td>
-                      {{ movement.entered_at | date: 'd MMM y' : '' : 'es-CO' }}<br />
-                      <span class="cell-sub">{{ movement.entered_at | date: 'h:mm a' : '' : 'es-CO' }}</span>
+                      {{ movement.entered_at | date: 'd MMM y' : '-0500' : 'es-CO' }}<br />
+                      <span class="cell-sub">{{ movement.entered_at | date: 'h:mm a' : '-0500' : 'es-CO' }}</span>
                     </td>
                     <td>
                       @if (movement.exited_at) {
-                        {{ movement.exited_at | date: 'd MMM y' : '' : 'es-CO' }}<br />
-                        <span class="cell-sub">{{ movement.exited_at | date: 'h:mm a' : '' : 'es-CO' }}</span>
+                        {{ movement.exited_at | date: 'd MMM y' : '-0500' : 'es-CO' }}<br />
+                        <span class="cell-sub">{{ movement.exited_at | date: 'h:mm a' : '-0500' : 'es-CO' }}</span>
                       } @else {
                         <span>Salida pendiente</span>
                       }
@@ -3272,12 +3350,14 @@
             </div>
           }
         </section>
+        }
 
+        @if (historyTab === 'payments') {
         <section class="panel">
           <div class="panel-head">
             <div>
-              <h2>Pagos del vehículo</h2>
-              <p>Vista de consulta</p>
+              <h2>Pagos de {{ historyPlate || 'todos los vehículos' }}</h2>
+              <p>{{ historyPayments.length }} registro(s) · Vista de consulta</p>
             </div>
           </div>
           <div class="data-table">
@@ -3293,7 +3373,7 @@
                 </tr>
               </thead>
               <tbody>
-                @for (payment of payments; track payment.id) {
+                @for (payment of historyPayments; track payment.id) {
                   <tr>
                     <td><strong>PAG-{{ payment.id.toString().padStart(4, '0') }} · {{ payment.plate }}</strong></td>
                     <td>
@@ -3322,35 +3402,55 @@
             </table>
           </div>
         </section>
+        }
 
+        @if (historyTab === 'novelties') {
         <section class="panel">
           <div class="panel-head">
             <div>
-              <h2>Última novedad asociada</h2>
+              <h2>Novedades de {{ historyPlate || 'todos los vehículos' }}</h2>
+              <p>{{ historyNovelties.length }} registro(s)</p>
             </div>
           </div>
-          @if (vehicleLastNovelty) {
-            <div class="novelty-row">
-              <span
-                class="status-pill"
-                [class.status-pill--ok]="vehicleLastNovelty.status === 'RESOLVED'"
-                [class.status-pill--active]="vehicleLastNovelty.status !== 'RESOLVED'"
-              >
-                {{ noveltyStatusLabel(vehicleLastNovelty.status) }}
-              </span>
-              <div class="novelty-detail">
-                <strong>{{ vehicleLastNovelty.created_at | date: 'd MMM y' : '' : 'es-CO' }} · {{ vehicleLastNovelty.created_at | date: 'h:mm a' : '' : 'es-CO' }} · {{ vehicleLastNovelty.category }}</strong>
-                <p>{{ vehicleLastNovelty.description }}</p>
-              </div>
-              <button class="link-button" type="button" (click)="navigate('novelties')">Consultar →</button>
-            </div>
-          } @else {
-            <div class="table-empty">
-              <img src="/icons/file-text.svg" alt="" width="16" height="16" />
-              <span>No hay novedades asociadas.</span>
-            </div>
-          }
+          <div class="data-table">
+            <table class="novelty-table">
+              <thead>
+                <tr>
+                  <th>Vehículo / fecha</th>
+                  <th>Categoría / descripción</th>
+                  <th>Estado</th>
+                  <th>Responsable</th>
+                </tr>
+              </thead>
+              <tbody>
+                @for (item of historyNovelties; track item.id) {
+                  <tr>
+                    <td>
+                      <strong>{{ item.plate }}</strong><br />
+                      <strong>{{ item.created_at | date: 'd MMM · h:mm a' : '' : 'es-CO' }}</strong>
+                    </td>
+                    <td>
+                      {{ item.category }}<br />
+                      {{ item.description }}
+                    </td>
+                    <td>{{ noveltyStatusLabel(item.status) }}</td>
+                    <td><span class="novelty-owner">{{ item.employee_name || '—' }}</span></td>
+                  </tr>
+                } @empty {
+                  <tr>
+                    <td colspan="4">
+                      <div class="table-empty">
+                        <img src="/icons/file-text.svg" alt="" width="16" height="16" />
+                        <span>No hay novedades registradas.</span>
+                      </div>
+                    </td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          </div>
         </section>
+        }
 
         <p class="history-footnote">Consulta limitada a {{ mapSiteName }}. No se permite editar ni borrar movimientos cerrados o pagos anteriores.</p>
         <p class="history-footnote">Autos Colombia · {{ mapSiteName }} · Datos ficticios de demostración · Solo mensualidades · COP</p>
@@ -3472,7 +3572,7 @@
                           }
                         </span>
                         <span class="directory-cell directory-cell--actions">
-                          <button type="button" (click)="$event.stopPropagation(); paymentVehicleId = row.vehicle_id; paymentMonths = 1; paymentMethod = 'TRANSFER'; paymentDialogOpen = true">Pagar</button>
+                          <button type="button" (click)="$event.stopPropagation(); openPaymentForVehicleId(row.vehicle_id)">Pagar</button>
                           <span class="directory-separator">·</span>
                           <button type="button" (click)="$event.stopPropagation(); openPaymentHistory(row.vehicle_id)">Historial</button>
                         </span>
@@ -3537,55 +3637,6 @@
         <p class="page-footer">
           Autos Colombia · {{ parkingName }} · Datos ficticios de demostración · Solo mensualidades · COP
         </p>
-
-        @if (paymentDialogOpen) {
-          <div class="dialog-backdrop" (click)="closePaymentDialog()">
-            <section class="dialog-card" role="dialog" aria-modal="true" (click)="$event.stopPropagation()">
-              <div class="panel-head">
-                <div>
-                  <h2>Registrar pago</h2>
-                  <p>Los anticipos se aplican a periodos futuros consecutivos.</p>
-                </div>
-              </div>
-              <form class="stack-form" (ngSubmit)="registerPayment()" #paymentDialogForm="ngForm">
-                <div class="campo">
-                  <label for="dlgPaymentVehicle">Vehículo</label>
-                  <select id="dlgPaymentVehicle" name="dlgPaymentVehicle" required [(ngModel)]="paymentVehicleId">
-                    <option [ngValue]="0">Seleccionar placa…</option>
-                    @for (vehicle of vehicles; track vehicle.id) {
-                      <option [ngValue]="vehicle.id">{{ vehicle.plate }} · {{ vehicle.type_name }} · {{ vehicle.customer_name }}</option>
-                    }
-                  </select>
-                </div>
-                @if (paymentVehicleId) {
-                  <div class="payment-estimate">
-                    <span>Valor estimado</span>
-                    <strong>{{ formatMoney(monthlyPrice(paymentVehicleId) * paymentMonths) }}</strong>
-                  </div>
-                }
-                <div class="campo">
-                  <label for="dlgMonths">Meses a pagar</label>
-                  <select id="dlgMonths" name="dlgMonths" [(ngModel)]="paymentMonths">
-                    <option [ngValue]="1">1 mes</option>
-                    <option [ngValue]="2">2 meses</option>
-                    <option [ngValue]="3">3 meses</option>
-                    <option [ngValue]="6">6 meses</option>
-                    <option [ngValue]="12">12 meses</option>
-                  </select>
-                </div>
-                <div class="campo">
-                  <label for="dlgMethod">Método de pago</label>
-                  <select id="dlgMethod" name="dlgMethod" [(ngModel)]="paymentMethod">
-                    <option value="CASH">Efectivo</option>
-                    <option value="TRANSFER">Transferencia</option>
-                    <option value="CARD">Tarjeta</option>
-                  </select>
-                </div>
-                <button class="button button-primary" type="submit" [disabled]="paymentDialogForm.invalid || !paymentVehicleId || busy">Registrar pago</button>
-              </form>
-            </section>
-          </div>
-        }
 
         @if (paymentHistoryVehicleId) {
           <div class="dialog-backdrop" (click)="closePaymentHistory()">
@@ -5992,11 +6043,11 @@
                         <strong class="plate-tag">{{ movement.plate }}</strong>
                         <span class="cell-sub">{{ movement.type_name }}</span>
                       </td>
-                      <td>{{ movement.entered_at | date: 'd MMM · HH:mm' : '' : 'es-CO' }}</td>
+                      <td>{{ movement.entered_at | date: 'd MMM · HH:mm' : '-0500' : 'es-CO' }}</td>
                       <td>
                         {{
                           movement.exited_at
-                            ? (movement.exited_at | date: 'd MMM · HH:mm' : '' : 'es-CO')
+                            ? (movement.exited_at | date: 'd MMM · HH:mm' : '-0500' : 'es-CO')
                             : 'En curso'
                         }}
                       </td>
@@ -6361,7 +6412,7 @@
               <div class="stack-form">
                 <div class="campo">
                   <label>Vehículo *</label>
-                  <select [(ngModel)]="paymentVehicleId" name="paymentVehicle">
+                  <select [(ngModel)]="paymentVehicleId" name="paymentVehicle" (ngModelChange)="onPaymentVehicleChange()">
                     <option [ngValue]="0">Selecciona un vehículo</option>
                     @for (vehicle of vehicles; track vehicle.id) {
                       <option [ngValue]="vehicle.id">{{ vehicle.plate }} · {{ vehicle.brand }} · {{ vehicle.type_name }}</option>
@@ -6384,33 +6435,49 @@
                 </div>
               </div>
               <nav class="customer-tabs" style="border-bottom: 1px solid var(--border);">
-                <button type="button" class="customer-tab">Mensualidad</button>
-                <button type="button" class="customer-tab customer-tab--active">Anticipo de periodos</button>
+                <button
+                  type="button"
+                  class="customer-tab"
+                  [class.customer-tab--active]="paymentTab === 'monthly'"
+                  (click)="selectPaymentTab('monthly')"
+                >
+                  Mensualidad
+                </button>
+                <button
+                  type="button"
+                  class="customer-tab"
+                  [class.customer-tab--active]="paymentTab === 'advance'"
+                  (click)="selectPaymentTab('advance')"
+                >
+                  Anticipo de periodos
+                </button>
               </nav>
+              @if (paymentTab === 'advance') {
+                <div class="two-fields">
+                  <div class="campo">
+                    <label for="paymentMonths">Cantidad de periodos *</label>
+                    <select id="paymentMonths" [(ngModel)]="paymentMonths" name="paymentMonths">
+                      <option [ngValue]="1">1 periodo</option>
+                      <option [ngValue]="2">2 periodos consecutivos</option>
+                      <option [ngValue]="3">3 periodos consecutivos</option>
+                      <option [ngValue]="6">6 periodos consecutivos</option>
+                      <option [ngValue]="12">12 periodos consecutivos</option>
+                    </select>
+                  </div>
+                  <div class="campo">
+                    <label>Desde el siguiente periodo</label>
+                    <input type="text" [value]="selectedVehicle?.expires_on ? formatDate(selectedVehicle.expires_on) : ''" readonly />
+                  </div>
+                </div>
+              }
               <div class="two-fields">
                 <div class="campo">
-                  <label>Cantidad de periodos *</label>
-                  <select [(ngModel)]="paymentMonths" name="paymentMonths">
-                    <option [ngValue]="1">1 periodo</option>
-                    <option [ngValue]="2">2 periodos consecutivos</option>
-                    <option [ngValue]="3">3 periodos consecutivos</option>
-                    <option [ngValue]="6">6 periodos consecutivos</option>
-                    <option [ngValue]="12">12 periodos consecutivos</option>
-                  </select>
+                  <label for="paymentPaidAt">Fecha y hora de pago *</label>
+                  <input id="paymentPaidAt" type="datetime-local" [(ngModel)]="paymentPaidAt" name="paymentPaidAt" />
                 </div>
                 <div class="campo">
-                  <label>Desde el siguiente periodo</label>
-                  <input type="text" [value]="selectedVehicle?.expires_on ? formatDate(selectedVehicle.expires_on) : ''" readonly />
-                </div>
-              </div>
-              <div class="two-fields">
-                <div class="campo">
-                  <label>Fecha y hora de pago *</label>
-                  <input type="text" [value]="formatLongDate(today)" readonly />
-                </div>
-                <div class="campo">
-                  <label>Método de pago *</label>
-                  <select [(ngModel)]="paymentMethod" name="paymentMethod">
+                  <label for="paymentMethod">Método de pago *</label>
+                  <select id="paymentMethod" [(ngModel)]="paymentMethod" name="paymentMethod">
                     <option value="TRANSFER">Transferencia</option>
                     <option value="CASH">Efectivo</option>
                     <option value="CARD">Tarjeta</option>
@@ -6419,21 +6486,30 @@
               </div>
               <div class="two-fields">
                 <div class="campo">
-                  <label>Importe total · COP *</label>
-                  <input type="text" [value]="formatMoney(monthlyPrice(paymentVehicleId) * paymentMonths)" readonly />
+                  <label for="paymentTotal">Importe total · COP *</label>
+                  <input id="paymentTotal" type="text" [value]="formatMoney(paymentTotal)" readonly />
                 </div>
                 <div class="campo">
-                  <label>Referencia</label>
-                  <input type="text" placeholder="TRX-000000" />
+                  <label for="paymentReference">Referencia</label>
+                  <input id="paymentReference" type="text" placeholder="TRX-000000" [(ngModel)]="paymentReference" name="paymentReference" />
                 </div>
               </div>
               <p><span class="cell-sub">Empleado responsable　</span><strong>Laura Martínez · Turno día</strong></p>
-              <div class="message message--info">
-                <p class="message-title">ⓘ Anticipo consecutivo</p>
-                <p class="message-body">
-                  Inicia al terminar la cobertura actual. No hay saltos, superposición ni cambios a pagos ya registrados.
-                </p>
-              </div>
+              @if (paymentTab === 'advance') {
+                <div class="message message--info">
+                  <p class="message-title">ⓘ Anticipo consecutivo</p>
+                  <p class="message-body">
+                    Inicia al terminar la cobertura actual. No hay saltos, superposición ni cambios a pagos ya registrados.
+                  </p>
+                </div>
+              } @else {
+                <div class="message message--info">
+                  <p class="message-title">ⓘ Mensualidad</p>
+                  <p class="message-body">
+                    Se registra un solo periodo con la tarifa vigente del vehículo seleccionado.
+                  </p>
+                </div>
+              }
             </section>
           </div>
 
@@ -6447,15 +6523,15 @@
               @if (selectedVehicle) {
                 <span class="status-pill status-pill--ok">{{ selectedVehicle.plate }} · {{ selectedVehicle.type_name }}</span>
               }
-              @for (i of [].constructor(paymentMonths); track $index) {
-                <p><span class="cell-sub">Periodo {{ $index + 1 }}　</span><strong>Próximo periodo</strong></p>
+              @for (i of [].constructor(paymentPeriods); track $index) {
+                <p><span class="cell-sub">Periodo {{ $index + 1 }}　</span><strong>{{ paymentTab === 'monthly' ? 'Mensualidad' : 'Próximo periodo' }}</strong></p>
                 <p><span class="cell-sub">Importe periodo {{ $index + 1 }}　</span><strong>{{ formatMoney(monthlyPrice(paymentVehicleId)) }} COP</strong></p>
-                @if ($index < paymentMonths - 1) { <div style="height:1px;background:var(--border);width:100%"></div> }
+                @if ($index < paymentPeriods - 1) { <div style="height:1px;background:var(--border);width:100%"></div> }
               }
               <div style="height:1px;background:var(--border);width:100%"></div>
-              <p><span class="cell-sub">Total a registrar　</span><strong>{{ formatMoney(monthlyPrice(paymentVehicleId) * paymentMonths) }} COP</strong></p>
+              <p><span class="cell-sub">Total a registrar　</span><strong>{{ formatMoney(paymentTotal) }} COP</strong></p>
               <p><span class="cell-sub">Nuevo vencimiento　</span><strong>—</strong></p>
-              <button class="button button-primary" type="button" (click)="registerPayment()" [disabled]="busy || !paymentVehicleId">Confirmar pago de {{ formatMoney(monthlyPrice(paymentVehicleId) * paymentMonths) }}</button>
+              <button class="button button-primary" type="button" (click)="registerPayment()" [disabled]="busy || !paymentVehicleId">Confirmar pago de {{ formatMoney(paymentTotal) }}</button>
             </section>
 
             <section class="panel">
@@ -6470,7 +6546,11 @@
               }
               <div style="height:1px;background:var(--border);width:100%"></div>
               <p><span class="cell-sub">Total mensual del cliente　</span><strong>{{ formatMoney(customerMonthlyAmount(customerVehicles(selectedVehicle?.customer_id || 0))) }} COP</strong></p>
-              <p class="cell-sub">Este anticipo se aplica solo al vehículo seleccionado. Las demás mensualidades se conservan independientes.</p>
+              @if (paymentTab === 'advance') {
+                <p class="cell-sub">Este anticipo se aplica solo al vehículo seleccionado. Las demás mensualidades se conservan independientes.</p>
+              } @else {
+                <p class="cell-sub">Esta mensualidad se aplica solo al vehículo seleccionado. Las demás mensualidades se conservan independientes.</p>
+              }
             </section>
           </div>
         </div>
