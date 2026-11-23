@@ -3021,40 +3021,6 @@
                   mediante ingresos y salidas.
                 </span>
               </form>
-
-              @if (can(permissions.MANAGE_CELLS)) {
-                <div class="reg-actions">
-                  <button class="button button-danger" type="button" (click)="openCellDelete()">
-                    Eliminar celda
-                  </button>
-                </div>
-              }
-            }
-
-            @if (cellDeleteConfirmOpen && cellDeleteCell) {
-              <div class="reg-note reg-note--danger">
-                <strong>¿Eliminar la celda {{ cellDeleteCell.code }}?</strong>
-                <span>
-                  Esta acción no se puede deshacer. Solo se permite si la celda no tiene movimientos
-                  activos ni historial que deba conservarse.
-                </span>
-                @if (cellDeleteError) {
-                  <span class="field-hint field-hint--error">{{ cellDeleteError }}</span>
-                }
-                <div class="reg-actions">
-                  <button class="button button-secondary" type="button" (click)="cancelCellDelete()">
-                    Cancelar
-                  </button>
-                  <button
-                    class="button button-danger"
-                    type="button"
-                    [disabled]="busy"
-                    (click)="confirmCellDelete()"
-                  >
-                    Sí, eliminar celda
-                  </button>
-                </div>
-              </div>
             }
           </article>
 
