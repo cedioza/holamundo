@@ -1055,6 +1055,10 @@ export class App implements OnInit {
 
   /** Abre el alta de celdas en la pestaña «Registro y configuración». */
   openCreateCell(): void {
+    if (!this.can('MANAGE_CELLS')) {
+      this.error = 'La creación de celdas está reservada al administrador.';
+      return;
+    }
     const yaEnCeldas = this.page === 'cells';
     if (!yaEnCeldas) this.navigate('cells');
     this.cellsTab = 'registration';
@@ -1316,6 +1320,10 @@ export class App implements OnInit {
 
   /** Lleva una celda del inventario a la pestaña de registro para editarla. */
   editCellFromInventory(cell: Cell): void {
+    if (!this.can('MANAGE_CELLS')) {
+      this.error = 'La modificación de celdas está reservada al administrador.';
+      return;
+    }
     this.loadCellEdit(cell);
     this.cellsTab = 'registration';
     this.error = '';

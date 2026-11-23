@@ -207,10 +207,12 @@
               </button>
             }
             @case ('cells') {
-              <button class="button button-primary" type="button" (click)="openCreateCell()">
-                <img src="/icons/plus.svg" alt="" width="16" height="16" />
-                <span>Crear celda</span>
-              </button>
+              @if (can(permissions.MANAGE_CELLS)) {
+                <button class="button button-primary" type="button" (click)="openCreateCell()">
+                  <img src="/icons/plus.svg" alt="" width="16" height="16" />
+                  <span>Crear celda</span>
+                </button>
+              }
             }
             @case ('novelties') {
               <span class="history-badge history-badge--info">
@@ -2181,13 +2183,15 @@
                         }
                       </td>
                       <td>
-                        <button
-                          class="link-button"
-                          type="button"
-                          (click)="$event.stopPropagation(); editCellFromInventory(celda)"
-                        >
-                          Editar →
-                        </button>
+                        @if (can(permissions.MANAGE_CELLS)) {
+                          <button
+                            class="link-button"
+                            type="button"
+                            (click)="$event.stopPropagation(); editCellFromInventory(celda)"
+                          >
+                            Editar →
+                          </button>
+                        }
                       </td>
                     </tr>
                   } @empty {
@@ -3931,10 +3935,12 @@
                 <button class="button button-secondary" type="button" (click)="navigate('cells')">
                   <span>Editar inventario</span>
                 </button>
-                <button class="button button-primary" type="button" (click)="openCreateCell()">
-                  <img src="/icons/plus.svg" alt="" width="16" height="16" />
-                  <span>Crear celda</span>
-                </button>
+                @if (can(permissions.MANAGE_CELLS)) {
+                  <button class="button button-primary" type="button" (click)="openCreateCell()">
+                    <img src="/icons/plus.svg" alt="" width="16" height="16" />
+                    <span>Crear celda</span>
+                  </button>
+                }
               </div>
               <p class="panel-footnote">
                 Los códigos son únicos dentro de cada zona. La capacidad cambia al crear o retirar celdas del inventario, no editando un total.

@@ -37,7 +37,7 @@ ROLE_CATALOG: tuple[dict[str, Any], ...] = (
         "name": "Empleado",
         "description": (
             "Registrar ingresos, salidas, pagos y novedades; consultar clientes, "
-            "vehículos y ocupación; crear y configurar celdas. Sin acceso administrativo."
+            "vehículos y ocupación. Sin acceso administrativo ni a la configuración de celdas."
         ),
         "sort": 2,
     },
@@ -53,7 +53,7 @@ ROLE_PERMISSIONS: dict[str, tuple[str, ...]] = {
         P_VIEW_ACTIVITY,
         P_VIEW_HISTORY,
     ),
-    ROLE_EMPLOYEE: (P_OPERATE, P_VIEW_AVAILABILITY, P_MANAGE_CELLS),
+    ROLE_EMPLOYEE: (P_OPERATE, P_VIEW_AVAILABILITY),
 }
 
 PERMISSION_FUNCTIONS: tuple[tuple[str, str], ...] = (
