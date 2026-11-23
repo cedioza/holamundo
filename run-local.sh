@@ -111,7 +111,7 @@ if [[ "${AUTO_INIT_DB:-0}" == "1" ]]; then
 fi
 
 # Iniciar backend y frontend
-(cd "$ROOT/backend" && "$VENV_PY" -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000) &
+(cd "$ROOT/backend" && "$VENV_PY" -m run_api) &
 API_PID=$!
 
 (cd "$ROOT/frontend" && NG_CLI_ANALYTICS=false npm start -- --host 127.0.0.1) &
