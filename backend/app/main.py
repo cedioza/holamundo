@@ -1062,6 +1062,7 @@ def build_report(
     site_id: int | None = None,
     zone_id: int | None = None,
     vehicle_type_id: int | None = None,
+    search: str = "",
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=10, ge=1, le=100),
     db: Session = Depends(get_db),
@@ -1192,6 +1193,14 @@ def build_report(
             expired += 1
 
     day_movements = sorted(day_entries + day_exits, key=lambda item: item.entered_at, reverse=True)
+    if search.strip():
+        needle = search.strip().lower()
+        day_movements = [
+            item for item in day_movements
+            if needle in (item.vehicle.plate or "").lower()
+            or needle in ((item.vehicle.customer.document_number if item.vehicle.customer else "") or "").lower()
+            or needle in ((item.vehicle.customer.full_name if item.vehicle.customer else "") or "").lower()
+        ]
     total_movements = len(day_movements)
     start = (page - 1) * page_size
     page_items = day_movements[start:start + page_size]

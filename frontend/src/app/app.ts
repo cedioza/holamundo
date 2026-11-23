@@ -51,15 +51,6 @@ type UserTab = 'directory' | 'status' | 'activity';
 /** Filtro de estado en el directorio de cuentas. */
 type UserStatusFilter = 'ALL' | 'ACTIVE' | 'INACTIVE';
 
-/** Estado de cada panel de comprobación de acceso (sin sesión). */
-type LoginState = {
-  id: 'required' | 'bad' | 'inactive';
-  username: string;
-  password: string;
-  status: 'REQUIRED' | 'BAD_CREDENTIALS' | 'INACTIVE' | 'OK';
-  message: string;
-};
-
 /** Pestañas del módulo de configuración operativa. */
 type ConfigTab = 'inventory' | 'types' | 'rules' | 'roles';
 
@@ -379,7 +370,7 @@ export class App implements OnInit {
   /* Módulo de administración · empleados y turnos */
   employeeTab: EmployeeTab = 'team';
   employeeForm = { full_name: '', document_number: '', username: '', role: 'OPERATOR', shift_id: 0 };
-  shiftForm = { name: '', starts_at: '06:00', ends_at: '18:00', notes: '' };
+  shiftForm = { name: '', starts_at: '18:00', ends_at: '06:00', notes: '' };
   editingEmployeeId = 0;
   editingEmployeeActive = false;
   employeeDialogOpen = false;
@@ -411,14 +402,9 @@ export class App implements OnInit {
   /** Estado que se pide confirmar en la pestaña «Estado y permisos». */
   statusWantedActive = false;
   showMyPermissions = false;
-  loginStates: LoginState[] = [
-    { id: 'required', username: '', password: '', status: 'REQUIRED', message: '' },
-    { id: 'bad', username: 'diego.ramirez', password: '', status: 'BAD_CREDENTIALS', message: '' },
-    { id: 'inactive', username: 'oscar.valencia', password: '', status: 'INACTIVE', message: '' },
-  ];
 
   /* Módulo de administración · reportes */
-  reportFilters = { site_id: 0, zone_id: 0, vehicle_type_id: 0, report_date: '' };
+  reportFilters = { site_id: 0, zone_id: 0, vehicle_type_id: 0, report_date: '', search: '' };
   reportPage = 1;
   readonly reportPageSize = 10;
 
@@ -3463,21 +3449,31 @@ export class App implements OnInit {
   }
   /** Alcance de cada rol dentro de la interfaz. */
   readonly rolePermissions: { role: string; label: string; description: string }[] = [
-    { role: 'OPERATOR', label: 'Operador', description: 'Ingresos, salidas, pagos y novedades' },
-    { role: 'ADMIN', label: 'Administradora', description: 'Operación y configuración' },
+    { role: 'OPERATOR', label: 'Empleado', description: 'Ingresos, salidas, pagos y novedades' },
+    { role: 'ADMIN', label: 'Administrador', description: 'Operación y configuración' },
   ];
 
   loadAdminTeam(): void {
     this.api.employees().subscribe({
       next: (data) => {
-        this.employees = data;
+        // Corrige igualmente el nombre del turno anidado en cada empleado.
+        this.employees = data.map((employee) => ({
+          ...employee,
+          shift: employee.shift
+            ? { ...employee.shift, name: employee.shift.name.replace(/\bTorno\b/gi, 'Turno') }
+            : null,
+        }));
         this.changeDetector.detectChanges();
       },
       error: (err: unknown) => this.fail(err),
     });
     this.api.shifts().subscribe({
       next: (data) => {
-        this.shifts = data;
+        // Normaliza el nombre guardado en la BD: "Torno noche" -> "Turno noche".
+        this.shifts = data.map((shift) => ({
+          ...shift,
+          name: shift.name.replace(/\bTorno\b/gi, 'Turno'),
+        }));
         this.changeDetector.detectChanges();
       },
       error: (err: unknown) => this.fail(err),
@@ -3496,6 +3492,17 @@ export class App implements OnInit {
     if (value instanceof Date) return value.getHours() * 60 + value.getMinutes();
     const [hour, minute] = value.split(':').map(Number);
     return (hour || 0) * 60 + (minute || 0);
+  }
+
+  /** Formatea "HH:MM" como "HH:MMam"/"HH:MMpm" para el horario de referencia. */
+  private clockLabel(value: string): string {
+    const hour = Number(value.split(':')[0]) || 0;
+    return `${value}${hour >= 12 && hour < 24 ? 'pm' : 'am'}`;
+  }
+
+  /** Horario de referencia legible: "de 18:00pm a 06:00am". */
+  shiftReference(shift: Shift): string {
+    return `de ${this.clockLabel(shift.starts_at)} a ${this.clockLabel(shift.ends_at)}`;
   }
 
   /** True si el instante cae dentro del horario del turno (soporta cruce de medianoche). */
@@ -3625,7 +3632,7 @@ export class App implements OnInit {
       })
       .subscribe({
         next: () => {
-          this.shiftForm = { name: '', starts_at: '06:00', ends_at: '18:00', notes: '' };
+          this.shiftForm = { name: '', starts_at: '18:00', ends_at: '06:00', notes: '' };
           this.done('Turno creado.');
           this.loadAdminTeam();
         },
@@ -3649,6 +3656,7 @@ export class App implements OnInit {
         site_id: this.reportFilters.site_id || undefined,
         zone_id: this.reportFilters.zone_id || undefined,
         vehicle_type_id: this.reportFilters.vehicle_type_id || undefined,
+        search: this.reportFilters.search || undefined,
         page: this.reportPage,
         page_size: this.reportPageSize,
       })
@@ -3670,6 +3678,11 @@ export class App implements OnInit {
     this.loadReport();
   }
 
+  /** La búsqueda por placa, documento o nombre del cliente recarga el reporte. */
+  onReportSearchChange(): void {
+    this.onReportFilterChange();
+  }
+
   get reportTotalPages(): number {
     return Math.max(1, Math.ceil((this.report?.movements_total ?? 0) / this.reportPageSize));
   }
@@ -3681,7 +3694,7 @@ export class App implements OnInit {
 
   /** Restablece los filtros del reporte al estado inicial. */
   resetReportFilters(): void {
-    this.reportFilters = { site_id: 0, zone_id: 0, vehicle_type_id: 0, report_date: '' };
+    this.reportFilters = { site_id: 0, zone_id: 0, vehicle_type_id: 0, report_date: '', search: '' };
     this.reportPage = 1;
     this.loadReport();
   }
@@ -4332,37 +4345,6 @@ export class App implements OnInit {
     });
   }
 
-  /** Comprueba credenciales reales sin crear sesión. */
-  runLoginCheck(state: LoginState): void {
-    if (!state.username.trim() || !state.password) {
-      this.setLoginState(state.id, { status: 'REQUIRED', message: '' });
-      return;
-    }
-    this.api
-      .accessCheck({
-        parking_lot_id: this.selectedLotId,
-        username: state.username.trim(),
-        password: state.password,
-      })
-      .subscribe({
-        next: (result) => this.setLoginState(state.id, { status: result.status, message: result.message }),
-        error: (err: unknown) => this.fail(err),
-      });
-  }
-
-  onLoginField(state: LoginState, field: 'username' | 'password', value: string): void {
-    this.loginStates = this.loginStates.map((item) =>
-      item.id === state.id ? { ...item, [field]: value } : item,
-    );
-  }
-
-  private setLoginState(id: LoginState['id'], patch: Partial<LoginState>): void {
-    this.loginStates = this.loginStates.map((item) =>
-      item.id === id ? { ...item, ...patch } : item,
-    );
-    this.changeDetector.detectChanges();
-  }
-
   /** Indicadores del directorio, calculados con los datos reales. */
   get userStats(): { label: string; value: number; hint: string }[] {
     const total = this.users.length;
@@ -4590,48 +4572,6 @@ export class App implements OnInit {
     }
     if (status !== 'ALL') bits.push(status === 'ACTIVE' ? 'solo activas' : 'solo inactivas');
     return bits.length ? bits.join(' · ') : 'Sin filtros aplicados';
-  }
-
-  /** Kicker de cada panel de acceso. */
-  loginKicker(state: LoginState): string {
-    const labels: Record<LoginState['status'], string> = {
-      REQUIRED: 'ACCESO · CAMPOS REQUERIDOS',
-      BAD_CREDENTIALS: 'ACCESO · CREDENCIALES INCORRECTAS',
-      INACTIVE: 'ACCESO · CUENTA INACTIVA',
-      OK: 'ACCESO · COMPROBACIÓN VERIFICADA',
-    };
-    return labels[state.status];
-  }
-
-  loginTitle(state: LoginState): string {
-    const titles: Record<LoginState['status'], string> = {
-      REQUIRED: 'Completa los datos de acceso',
-      BAD_CREDENTIALS: 'No pudimos iniciar sesión',
-      INACTIVE: 'Cuenta inactiva · Acceso no permitido',
-      OK: 'Credenciales verificadas',
-    };
-    return titles[state.status];
-  }
-
-  loginBody(state: LoginState): string {
-    if (state.message) return state.message;
-    const bodies: Record<LoginState['status'], string> = {
-      REQUIRED: 'Los dos campos son obligatorios. No se ha iniciado sesión.',
-      BAD_CREDENTIALS: 'El usuario o la contraseña no coinciden. Verifica los datos e inténtalo de nuevo.',
-      INACTIVE: 'Contacta al administrador para revisar el estado de tu cuenta. No se inició sesión.',
-      OK: 'La comprobación no inicia sesión en esta interfaz.',
-    };
-    return bodies[state.status];
-  }
-
-  loginAction(state: LoginState): string {
-    const actions: Record<LoginState['status'], string> = {
-      REQUIRED: 'Iniciar sesión',
-      BAD_CREDENTIALS: 'Volver a intentar',
-      INACTIVE: 'Volver al acceso',
-      OK: 'Comprobar de nuevo',
-    };
-    return actions[state.status];
   }
 
   /** Filas de la matriz «Permisos por rol». */

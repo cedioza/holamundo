@@ -955,6 +955,12 @@
   background: var(--warning-bg);
   color: var(--warning-fg);
 }
+.status-text--good {
+  color: var(--success);
+}
+.status-text--bad {
+  color: var(--danger);
+}
 
 /* ------------------------------------------------------------------ */
 /* Campos · label 12px SemiBold · entrada 43px r 6                    */
@@ -3687,27 +3693,6 @@ textarea {
   align-items: start;
 }
 
-/* Comprobación de acceso · 3 columnas */
-.login-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 20px;
-  align-items: start;
-}
-.login-panel .stack-form {
-  gap: 12px;
-}
-.login-panel .button {
-  width: 100%;
-}
-.login-panel .panel-head > div {
-  flex: 1 1 auto;
-}
-.login-panel .panel-kicker {
-  flex: 1 1 auto;
-  text-align: right;
-}
-
 /* Perfil · 2 columnas */
 .profile-grid {
   display: grid;
@@ -3854,17 +3839,13 @@ textarea {
   .stat-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
-  .login-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
 }
 
 @media (max-width: 1080px) {
   .users-split,
   .confirm-grid,
   .profile-grid,
-  .empty-search-grid,
-  .login-grid {
+  .empty-search-grid {
     grid-template-columns: minmax(0, 1fr);
   }
   .user-filters {

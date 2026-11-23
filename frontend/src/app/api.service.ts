@@ -206,12 +206,13 @@ export class ApiService {
     return this.http.patch<Shift>(`${this.base}/shifts/${id}`, payload);
   }
   activity(limit = 10): Observable<ActivityItem[]> { return this.http.get<ActivityItem[]>(`${this.base}/activity`, { params: this.scopedParams({ limit }) }); }
-  report(filters: { report_date?: string; site_id?: number; zone_id?: number; vehicle_type_id?: number; page?: number; page_size?: number } = {}): Observable<Report> {
+  report(filters: { report_date?: string; site_id?: number; zone_id?: number; vehicle_type_id?: number; search?: string; page?: number; page_size?: number } = {}): Observable<Report> {
     const values: Record<string, string | number> = {};
     if (filters.report_date) values['report_date'] = filters.report_date;
     if (filters.site_id) values['site_id'] = filters.site_id;
     if (filters.zone_id) values['zone_id'] = filters.zone_id;
     if (filters.vehicle_type_id) values['vehicle_type_id'] = filters.vehicle_type_id;
+    if (filters.search) values['search'] = filters.search;
     if (filters.page) values['page'] = filters.page;
     if (filters.page_size) values['page_size'] = filters.page_size;
     return this.http.get<Report>(`${this.base}/reports`, { params: this.scopedParams(values) });

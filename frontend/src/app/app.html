@@ -1082,7 +1082,12 @@
                           <span class="status-pill status-good">VIGENTE</span>
                           <span class="status-pill status-warn" title="Próxima a vencer">PRÓXIMA</span>
                         } @else {
-                          {{ vehicleMonthlyLabel(vehiculo) }}
+                          <span
+                            [class.status-text--good]="vehiculo.monthly_status === 'VIGENTE'"
+                            [class.status-text--bad]="vehiculo.monthly_status === 'VENCIDA'"
+                          >
+                            {{ vehicleMonthlyLabel(vehiculo) }}
+                          </span>
                         }
                       </span>
                       <span class="vehicle-line">
@@ -1167,7 +1172,13 @@
                     <span class="vehicle-line vehicle-line--gap"></span>
                   </div>
                   <div class="vehicle-cell">
-                    <span class="vehicle-line">{{ vehicleMonthlyLabel(vehiculo) }}</span>
+                    <span
+                      class="vehicle-line"
+                      [class.status-text--good]="vehiculo.monthly_status === 'VIGENTE'"
+                      [class.status-text--bad]="vehiculo.monthly_status === 'VENCIDA'"
+                    >
+                      {{ vehicleMonthlyLabel(vehiculo) }}
+                    </span>
                     <span class="vehicle-line vehicle-line--gap"></span>
                     <span class="vehicle-line vehicle-line--gap"></span>
                   </div>
@@ -3930,7 +3941,9 @@
               </p>
             </section>
           </div>
+        }
 
+        @if (configTab === 'types') {
           <div class="config-split">
             <section class="panel">
               <h2 class="config-panel-title">Tipos y compatibilidad</h2>
@@ -3958,7 +3971,11 @@
                 Mantenimiento no cuenta como disponible. Una celda ocupada no puede pasar a mantenimiento.
               </p>
             </section>
+          </div>
+        }
 
+        @if (configTab === 'rules') {
+          <div class="config-split">
             <section class="panel">
               <h2 class="config-panel-title">Reglas definidas de operación</h2>
               <p class="config-rule">✓ Bloquear ingreso por mensualidad vencida o contrato sin cobertura.</p>
@@ -3968,46 +3985,27 @@
               <p class="config-rule">✓ La salida libera la celda y conserva el historial.</p>
             </section>
           </div>
+        }
 
+        @if (configTab === 'roles') {
           <section class="panel">
-            <h2 class="config-panel-title">Pendientes de confirmar</h2>
-            <div class="data-table">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Parámetro</th>
-                    <th>Estado</th>
-                    <th>Acción pendiente</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr>
-                    <td><strong>Capacidad física</strong></td>
-                    <td>Por confirmar</td>
-                    <td class="config-blue-cell">Validar inventario real por sede y tipo</td>
-                  </tr>
-                  <tr>
-                    <td><strong>Tarifas y horarios</strong></td>
-                    <td>Provisionales</td>
-                    <td class="config-blue-cell">Confirmar tarifas y horarios de turnos</td>
-                  </tr>
-                  <tr>
-                    <td><strong>Respaldo, recuperación y disponibilidad</strong></td>
-                    <td>Por definir en implementación</td>
-                    <td class="config-blue-cell">Acordar frecuencia, retención, recuperación y servicio</td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
+            <h2 class="config-panel-title">Roles y privacidad</h2>
+            @for (permission of rolePermissions; track permission.role) {
+              <p class="panel-role-row">
+                <span>{{ permission.label }}　</span>
+                <strong>{{ permission.description }}</strong>
+              </p>
+            }
+            <div class="panel-divider"></div>
             <p class="panel-footnote">
               Hash seguro de contraseñas, permisos reales, unicidad/transacciones atómicas y respuesta ≤ 3 segundos son requisitos de implementación; esta interfaz no certifica su cumplimiento.
             </p>
           </section>
-
-          <p class="page-footer-note">
-            Autos Colombia · {{ activeLot?.name ?? parkingName }} · Datos ficticios de demostración · Solo mensualidades · COP
-          </p>
         }
+
+        <p class="page-footer-note">
+          Autos Colombia · {{ activeLot?.name ?? parkingName }} · Datos ficticios de demostración · Solo mensualidades · COP
+        </p>
       }
 
       @if (page === 'parking-lots') {
@@ -4402,7 +4400,7 @@
                 <div class="data-rows">
                   <p>
                     <span>Horario de referencia</span>
-                    <strong>{{ shift.starts_at }} a. m.–{{ shift.ends_at }} p. m.</strong>
+                    <strong>{{ shiftReference(shift) }}</strong>
                   </p>
                   @for (member of shift.employees; track member.id) {
                     <p>
@@ -4496,7 +4494,7 @@
               }
               <div class="panel-divider"></div>
               <p class="panel-note">
-                El historial se consulta en modo de solo lectura por la administradora. La gestión de
+                El historial se consulta en modo de solo lectura por el Administrador. La gestión de
                 empleados, tarifas y permisos está restringida a administración.
               </p>
               <p class="panel-footnote">
@@ -4567,7 +4565,7 @@
               }
             </div>
             <p class="panel-note">
-              El historial se consulta en modo de solo lectura para las personas administradoras. Los
+              El historial se consulta en modo de solo lectura para el Administrador. Los
               datos mínimos que se muestran son identificación, nombre, usuario, rol y turno. No se
               muestran contraseñas.
             </p>
@@ -5290,73 +5288,6 @@
             </section>
           </div>
 
-          <div class="login-grid">
-            @for (state of loginStates; track state.id) {
-              <section class="panel login-panel">
-                <div class="panel-head">
-                  <div>
-                    <h2>Inicia sesión</h2>
-                    <p>Ingresa con el usuario asignado por tu administrador.</p>
-                  </div>
-                  <span class="panel-kicker">{{ loginKicker(state) }}</span>
-                </div>
-                <form class="stack-form" (ngSubmit)="runLoginCheck(state)">
-                  <div class="campo" [class.campo--error]="state.status === 'REQUIRED' && !state.username">
-                    <label for="login-{{ state.id }}-user">Usuario *</label>
-                    <input
-                      id="login-{{ state.id }}-user"
-                      name="loginUser-{{ state.id }}"
-                      type="text"
-                      autocomplete="off"
-                      placeholder="Sin completar"
-                      [ngModel]="state.username"
-                      (ngModelChange)="onLoginField(state, 'username', $event)"
-                    />
-                    @if (state.status === 'REQUIRED' && !state.username) {
-                      <span class="field-hint field-hint--error">Ingresa tu usuario.</span>
-                    }
-                  </div>
-                  <div class="campo" [class.campo--error]="state.status === 'REQUIRED' && !state.password">
-                    <label for="login-{{ state.id }}-pass">Contraseña *</label>
-                    <input
-                      id="login-{{ state.id }}-pass"
-                      name="loginPass-{{ state.id }}"
-                      type="password"
-                      autocomplete="off"
-                      placeholder="••••••••••••"
-                      [ngModel]="state.password"
-                      (ngModelChange)="onLoginField(state, 'password', $event)"
-                    />
-                    @if (state.status === 'REQUIRED' && !state.password) {
-                      <span class="field-hint field-hint--error">Ingresa tu contraseña.</span>
-                    } @else {
-                      <span class="field-hint">La contraseña permanece oculta.</span>
-                    }
-                  </div>
-                  <div
-                    class="message"
-                    [class.message--error]="state.status === 'REQUIRED' || state.status === 'BAD_CREDENTIALS'"
-                    [class.message--warning]="state.status === 'INACTIVE'"
-                    [class.message--success]="state.status === 'OK'"
-                    role="alert"
-                  >
-                    <p class="message-title">{{ loginTitle(state) }}</p>
-                    <p class="message-body">{{ loginBody(state) }}</p>
-                  </div>
-                  <button
-                    class="button"
-                    [class.button-secondary]="!state.username || !state.password"
-                    [class.button-primary]="!!state.username && !!state.password"
-                    type="submit"
-                    [disabled]="busy"
-                  >
-                    {{ loginAction(state) }}
-                  </button>
-                </form>
-              </section>
-            }
-          </div>
-
           <div class="profile-grid">
             <section class="panel">
               <div class="panel-head">
@@ -5780,7 +5711,13 @@
         <section class="filter-bar filter-bar--search" aria-label="Filtros del reporte">
           <div class="filter-search">
             <img src="/icons/search.svg" alt="" width="12" height="12" />
-            <span>{{ activeLot?.name ?? parkingName }} · Parqueadero seleccionado</span>
+            <input
+              type="search"
+              aria-label="Buscar por placa, documento o nombre del cliente"
+              placeholder="Buscar placa, documento o nombre del cliente"
+              [(ngModel)]="reportFilters.search"
+              (ngModelChange)="onReportSearchChange()"
+            />
           </div>
           <label class="filter-select">
             <select
@@ -6137,15 +6074,6 @@
       }
 
       @if (page === 'tariffs') {
-        <div class="message message--warning">
-          <p class="message-title">! Importes provisionales · Pendientes de confirmar con el cliente</p>
-          <p class="message-body">
-            Los valores de demostración son de referencia para el proyecto. No son tarifas
-            definitivas: cada vigencia se registra con su periodo de aplicación y no modifica los
-            pagos ya cerrados.
-          </p>
-        </div>
-
         <nav class="tab-bar" aria-label="Secciones de tarifas">
           <button
             type="button"
